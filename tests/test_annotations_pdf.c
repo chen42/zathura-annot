@@ -92,20 +92,39 @@ static void test_pdf_save_and_reload_roundtrip(void) {
 
   zathura_rectangle_t* r0_0 = girara_list_nth(loaded0->rectangles, 0);
   zathura_rectangle_t* r0_1 = girara_list_nth(loaded0->rectangles, 1);
-  g_assert_cmpfloat_with_epsilon(r0_0->x1, 72.0, 1e-3);
-  g_assert_cmpfloat_with_epsilon(r0_0->y1, 98.0, 1e-3);
-  g_assert_cmpfloat_with_epsilon(r0_0->x2, 280.0, 1e-3);
-  g_assert_cmpfloat_with_epsilon(r0_0->y2, 114.0, 1e-3);
-  g_assert_cmpfloat_with_epsilon(r0_1->x1, 72.0, 1e-3);
-  g_assert_cmpfloat_with_epsilon(r0_1->y1, 116.0, 1e-3);
-  g_assert_cmpfloat_with_epsilon(r0_1->x2, 230.0, 1e-3);
-  g_assert_cmpfloat_with_epsilon(r0_1->y2, 132.0, 1e-3);
+  g_assert_cmpfloat_with_epsilon(r0_0->x1, 72.0, 1e-2);
+  g_assert_cmpfloat(r0_0->y1, >, 98.0);
+  g_assert_cmpfloat(r0_0->y2, <, 114.0);
+  g_assert_cmpfloat_with_epsilon(r0_1->x1, 72.0, 1e-2);
+  g_assert_cmpfloat(r0_1->y1, >, 116.0);
+  g_assert_cmpfloat(r0_1->y2, <, 132.0);
+  /* Space between lines is excluded from highlight rectangles */
+  g_assert_cmpfloat(r0_1->y1 - r0_0->y2, >, 6.0);
+
+  const zathura_rectangle_t tight0 = *r0_0;
+  const zathura_rectangle_t tight1 = *r0_1;
 
   g_assert_cmpuint(loaded1->page, ==, 1);
   g_assert_cmpint(loaded1->color, ==, ZATHURA_ANNOTATION_COLOR_YELLOW);
   g_assert_cmpuint(girara_list_size(loaded1->rectangles), ==, 1);
   g_assert_cmpstr(loaded1->comment, ==, "");
   g_assert_true(loaded1->baked_in_surface);
+
+  /* Second save/reload roundtrip preserves the tightened rectangles */
+  g_assert_true(zathura_annotations_save_pdf(&zathura, pdf_path));
+  zathura_annotations_clear(&zathura);
+  g_assert_true(zathura_annotations_load_pdf(&zathura, pdf_path, NULL));
+  loaded0 = girara_list_nth(zathura.annotations.list, 0);
+  r0_0    = girara_list_nth(loaded0->rectangles, 0);
+  r0_1    = girara_list_nth(loaded0->rectangles, 1);
+  g_assert_cmpfloat_with_epsilon(r0_0->x1, tight0.x1, 1e-3);
+  g_assert_cmpfloat_with_epsilon(r0_0->y1, tight0.y1, 1e-3);
+  g_assert_cmpfloat_with_epsilon(r0_0->x2, tight0.x2, 1e-3);
+  g_assert_cmpfloat_with_epsilon(r0_0->y2, tight0.y2, 1e-3);
+  g_assert_cmpfloat_with_epsilon(r0_1->x1, tight1.x1, 1e-3);
+  g_assert_cmpfloat_with_epsilon(r0_1->y1, tight1.y1, 1e-3);
+  g_assert_cmpfloat_with_epsilon(r0_1->x2, tight1.x2, 1e-3);
+  g_assert_cmpfloat_with_epsilon(r0_1->y2, tight1.y2, 1e-3);
 
   zathura_annotations_free(&zathura);
   g_unlink(pdf_path);

@@ -17,6 +17,160 @@
 #include "page.h"
 #include "zathura.h"
 
+typedef struct tight_line_s {
+  double x1;
+  double y1;
+  double x2;
+  double y2;
+  double sum_y1;
+  double sum_y2;
+  double sum_w;
+} tight_line_t;
+
+static gint compare_tight_lines(gconstpointer a, gconstpointer b) {
+  const tight_line_t* la = a;
+  const tight_line_t* lb = b;
+  if (fabs(la->y1 - lb->y1) > 1e-3) {
+    return (la->y1 < lb->y1) ? -1 : 1;
+  }
+  if (fabs(la->x1 - lb->x1) > 1e-3) {
+    return (la->x1 < lb->x1) ? -1 : 1;
+  }
+  return 0;
+}
+
+static girara_list_t* tighten_poppler_page_rectangles(PopplerPage* page, girara_list_t* rectangles) {
+  if (rectangles == NULL || girara_list_size(rectangles) == 0) {
+    return zathura_annotation_rectangles_copy(rectangles);
+  }
+  if (page == NULL || !POPPLER_IS_PAGE(page)) {
+    return zathura_annotation_rectangles_copy(rectangles);
+  }
+
+  PopplerRectangle* layout = NULL;
+  guint n_layout           = 0;
+  if (!poppler_page_get_text_layout(page, &layout, &n_layout) || layout == NULL || n_layout == 0) {
+    g_free(layout);
+    return zathura_annotation_rectangles_copy(rectangles);
+  }
+
+  GArray* lines = g_array_new(FALSE, FALSE, sizeof(tight_line_t));
+  for (guint i = 0; i < n_layout; ++i) {
+    PopplerRectangle g = layout[i];
+    double gx1         = MIN(g.x1, g.x2);
+    double gx2         = MAX(g.x1, g.x2);
+    double gy1         = MIN(g.y1, g.y2);
+    double gy2         = MAX(g.y1, g.y2);
+    double gw          = gx2 - gx1;
+    double gh          = gy2 - gy1;
+    if (gw <= 1e-3 || gh <= 1e-3) {
+      continue;
+    }
+
+    double cx    = 0.5 * (gx1 + gx2);
+    double cy    = 0.5 * (gy1 + gy2);
+    bool matched = false;
+    for (size_t r_idx = 0; r_idx != girara_list_size(rectangles); ++r_idx) {
+      zathura_rectangle_t* r = girara_list_nth(rectangles, r_idx);
+      if (r == NULL) {
+        continue;
+      }
+      double rx1 = MIN(r->x1, r->x2);
+      double rx2 = MAX(r->x1, r->x2);
+      double ry1 = MIN(r->y1, r->y2);
+      double ry2 = MAX(r->y1, r->y2);
+      if (cx >= rx1 && cx <= rx2 && cy >= ry1 && cy <= ry2) {
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) {
+      continue;
+    }
+
+    bool placed = false;
+    for (guint li = 0; li < lines->len; ++li) {
+      tight_line_t* ln = &g_array_index(lines, tight_line_t, li);
+      double lcy       = 0.5 * (ln->y1 + ln->y2);
+      double lh        = ln->y2 - ln->y1;
+      double max_h     = MAX(gh, lh);
+      if (fabs(cy - lcy) <= 0.45 * max_h && gx1 <= ln->x2 + 2.5 * max_h && gx2 >= ln->x1 - 2.5 * max_h) {
+        ln->x1 = MIN(ln->x1, gx1);
+        ln->y1 = MIN(ln->y1, gy1);
+        ln->x2 = MAX(ln->x2, gx2);
+        ln->y2 = MAX(ln->y2, gy2);
+        ln->sum_y1 += gy1 * gw;
+        ln->sum_y2 += gy2 * gw;
+        ln->sum_w += gw;
+        placed = true;
+        break;
+      }
+    }
+
+    if (!placed) {
+      tight_line_t new_line = {
+          .x1     = gx1,
+          .y1     = gy1,
+          .x2     = gx2,
+          .y2     = gy2,
+          .sum_y1 = gy1 * gw,
+          .sum_y2 = gy2 * gw,
+          .sum_w  = gw,
+      };
+      g_array_append_val(lines, new_line);
+    }
+  }
+
+  g_free(layout);
+
+  if (lines->len == 0) {
+    g_array_free(lines, TRUE);
+    return zathura_annotation_rectangles_copy(rectangles);
+  }
+
+  g_array_sort(lines, compare_tight_lines);
+
+  girara_list_t* result = girara_list_new_with_free(g_free);
+  for (guint li = 0; li < lines->len; ++li) {
+    tight_line_t ln = g_array_index(lines, tight_line_t, li);
+    double base_y1  = (ln.sum_w > 0.0) ? (ln.sum_y1 / ln.sum_w) : ln.y1;
+    double base_y2  = (ln.sum_w > 0.0) ? (ln.sum_y2 / ln.sum_w) : ln.y2;
+    double lh       = base_y2 - base_y1;
+    double ty1      = base_y1 + 0.18 * lh;
+    double ty2      = base_y2 - 0.05 * lh;
+    if (ty2 <= ty1) {
+      ty1 = base_y1;
+      ty2 = base_y2;
+    }
+
+    zathura_rectangle_t* out_rect = g_malloc(sizeof(zathura_rectangle_t));
+    out_rect->x1                  = ln.x1;
+    out_rect->y1                  = ty1;
+    out_rect->x2                  = ln.x2;
+    out_rect->y2                  = ty2;
+    girara_list_append(result, out_rect);
+  }
+
+  g_array_free(lines, TRUE);
+  return result;
+}
+
+girara_list_t* zathura_annotations_tighten_page_rectangles(zathura_page_t* page, girara_list_t* rectangles) {
+  if (rectangles == NULL || girara_list_size(rectangles) == 0) {
+    return zathura_annotation_rectangles_copy(rectangles);
+  }
+  if (page == NULL) {
+    return zathura_annotation_rectangles_copy(rectangles);
+  }
+
+  void* page_data = zathura_page_get_data(page);
+  if (page_data == NULL || !POPPLER_IS_PAGE(page_data)) {
+    return zathura_annotation_rectangles_copy(rectangles);
+  }
+
+  return tighten_poppler_page_rectangles(POPPLER_PAGE(page_data), rectangles);
+}
+
 static char* extract_quote_from_poppler_page(PopplerPage* page, girara_list_t* rectangles) {
   if (page == NULL || rectangles == NULL || girara_list_size(rectangles) == 0) {
     return g_strdup("");
@@ -126,6 +280,12 @@ bool zathura_annotations_load_pdf_file(girara_list_t* list, const char* path, co
         zathura_rectangle_t* rect = g_malloc(sizeof(zathura_rectangle_t));
         *rect                     = zathura_annotation_pdf_quad_to_rect(fallback_quad, page_height);
         girara_list_append(rectangles, rect);
+      }
+
+      girara_list_t* tight_rectangles = tighten_poppler_page_rectangles(page, rectangles);
+      if (tight_rectangles != NULL) {
+        girara_list_free(rectangles);
+        rectangles = tight_rectangles;
       }
 
       g_autofree char* quote      = extract_quote_from_poppler_page(page, rectangles);

@@ -10,6 +10,13 @@
 #include "types.h"
 
 /**
+ * Tighten selection or annotation rectangles on a page so each rectangle
+ * matches a single line of text and its vertical height is limited to the
+ * text height without including inter-line spacing.
+ */
+girara_list_t* zathura_annotations_tighten_page_rectangles(zathura_page_t* page, girara_list_t* rectangles);
+
+/**
  * Load all /Highlight annotations from a PDF file into a list of zathura_annotation_t*.
  */
 bool zathura_annotations_load_pdf_file(girara_list_t* list, const char* path, const char* password);

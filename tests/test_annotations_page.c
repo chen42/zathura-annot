@@ -120,14 +120,28 @@ static void test_page_draw_highlight_and_comment_badge_visibility(void) {
 
   /* 1. Highlight without comment is yellow, highlight with comment is red, no indicator box outside */
   paint_surface_white(cr, 300, 200);
+  /* Paint a black glyph sample inside the highlight region to verify multiply blending keeps ink pure black */
+  cairo_save(cr);
+  cairo_set_source_rgb(cr, 0.0, 0.0, 0.0);
+  cairo_rectangle(cr, 50, 28, 6, 6);
+  cairo_fill(cr);
+  cairo_restore(cr);
+
   zathura_page_widget_draw_annotations(ZATHURA_PAGE_WIDGET(page_widget), cr, 1.0, true);
 
   guint8 r_hl = 0, g_hl = 0, b_hl = 0;
   guint8 r_cmt = 0, g_cmt = 0, b_cmt = 0;
   guint8 r_outside = 0, g_outside = 0, b_outside = 0;
+  guint8 r_ink = 0, g_ink = 0, b_ink = 0;
   get_pixel_rgb(surf, 70, 30, &r_hl, &g_hl, &b_hl);
   get_pixel_rgb(surf, 70, 70, &r_cmt, &g_cmt, &b_cmt);
   get_pixel_rgb(surf, 124, 60, &r_outside, &g_outside, &b_outside);
+  get_pixel_rgb(surf, 52, 30, &r_ink, &g_ink, &b_ink);
+
+  /* Black text ink under highlight stays pure black (0, 0, 0) */
+  g_assert_cmpuint(r_ink, ==, 0);
+  g_assert_cmpuint(g_ink, ==, 0);
+  g_assert_cmpuint(b_ink, ==, 0);
 
   /* Highlight without comment is yellow (high R, high G, lower B) */
   g_assert_cmpuint(r_hl, >, 240);

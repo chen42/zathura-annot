@@ -15,6 +15,7 @@
 #include "page.h"
 #include "adjustment.h"
 #include "annotation-panel.h"
+#include "annotations-pdf.h"
 #include "annotations.h"
 #include "render.h"
 #include "utils.h"
@@ -1080,7 +1081,7 @@ void zathura_page_widget_set_selection_snapshot(ZathuraPageWidget* widget, girar
     return;
   }
 
-  priv->selection_snapshot.rectangles = zathura_annotation_rectangles_copy(rectangles);
+  priv->selection_snapshot.rectangles = zathura_annotations_tighten_page_rectangles(priv->page, rectangles);
   priv->selection_snapshot.bounds     = zathura_annotation_get_bounds(priv->selection_snapshot.rectangles);
   priv->selection_snapshot.text       = g_strdup(text);
   priv->selection_snapshot.valid      = true;
@@ -1189,6 +1190,14 @@ void zathura_page_widget_draw_annotations(ZathuraPageWidget* widget, cairo_t* ca
 
   cairo_save(cairo);
 
+  const bool recolor_active =
+      (priv->zathura->sync.render_thread != NULL &&
+       zathura_renderer_recolor_enabled(priv->zathura->sync.render_thread) == true);
+  if (!recolor_active) {
+    /* Multiply blend places the highlight color beneath dark text ink so glyphs stay sharp */
+    cairo_set_operator(cairo, CAIRO_OPERATOR_MULTIPLY);
+  }
+
   for (guint i = 0; i < page_anns->len; ++i) {
     zathura_annotation_t* ann = g_ptr_array_index(page_anns, i);
     if (ann == NULL) {
@@ -1217,8 +1226,8 @@ void zathura_page_widget_draw_annotations(ZathuraPageWidget* widget, cairo_t* ca
           }
           zathura_rectangle_t sr = scale_annotation_rect(priv->zathura, priv->page, *rect, scale);
           cairo_rectangle(cairo, sr.x1, sr.y1, sr.x2 - sr.x1, sr.y2 - sr.y1);
-          cairo_fill(cairo);
         }
+        cairo_fill(cairo);
       } else {
         zathura_rectangle_t sr = scale_annotation_rect(priv->zathura, priv->page, ann->bounds, scale);
         cairo_rectangle(cairo, sr.x1, sr.y1, sr.x2 - sr.x1, sr.y2 - sr.y1);
@@ -1516,6 +1525,11 @@ static void cb_zathura_page_widget_motion_notify(GtkEventControllerMotion* contr
 
       priv->selection.list = zathura_page_get_selection(priv->page, selection, NULL);
       if (priv->selection.list != NULL && girara_list_size(priv->selection.list) != 0) {
+        girara_list_t* tight_list = zathura_annotations_tighten_page_rectangles(priv->page, priv->selection.list);
+        if (tight_list != NULL) {
+          girara_list_free(priv->selection.list);
+          priv->selection.list = tight_list;
+        }
         priv->selection.draw = true;
         zathura_page_widget_redraw_canvas(page);
       }
