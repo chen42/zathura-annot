@@ -20,13 +20,13 @@ Added Features in zathura-annot
   * Select text on a PDF page and right-click to open the annotation menu (`Highlight`, `Add comment`, or `Remove highlight` if the selection overlaps an existing highlight).
   * Right-click an existing highlight to add or edit its comment, mark it resolved or unresolved, or remove the highlight.
 * **Comment Side Panel**:
-  * Displays comment cards ordered by page and vertical position, with compact action buttons (`Page N`, `Edit`, `Resolve`/`Unresolve`, `Delete`) and a `Show resolved` filter.
+  * Displays comment cards ordered by page and vertical position, with a top-right `×` delete button, compact bottom action buttons (`Page N`, `Edit`, `Resolve`/`Unresolve`), and a `Show resolved` filter.
   * Clicking a comment card scrolls to the corresponding page and pulses the highlight; clicking a highlight selects and focuses its card in the panel.
   * Hiding the comment panel keeps page highlights visible.
 * **Keyboard Shortcuts and Commands**:
-  * `C` or `c`: Toggle the comment side panel (also available via `:comments [open|close|toggle]`).
-  * `]` / `[`: Jump to the next or previous comment.
+  * `Ctrl+Alt+c`: Toggle the comment side panel (also available via `:comments [open|close|toggle]`).
   * `Delete` / `BackSpace`: Remove the currently selected highlight or annotation.
+  * `Ctrl+Enter` / `Esc` (inside the inline comment editor): Save or cancel the comment edit.
 * **Configuration (`zathurarc`)**:
   * `annotation-panel-open` (`bool`, default `false`): Open the comment side panel automatically when opening a document.
   * `annotation-panel-width` (`int`, default `340`): Width of the comment side panel in pixels.
