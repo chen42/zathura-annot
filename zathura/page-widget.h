@@ -106,6 +106,26 @@ void zathura_page_widget_set_size_request(ZathuraPageWidget* widget, int width, 
  */
 void zathura_page_widget_clear_thumbnail(ZathuraPageWidget* widget);
 
+/**
+ * Draw highlight annotations on a Cairo context
+ */
+void zathura_page_widget_draw_annotations(ZathuraPageWidget* widget, cairo_t* cairo, double scale,
+                                          bool comment_panel_visible);
+
+/**
+ * Start a 360 ms reveal pulse animation on an annotation
+ */
+void zathura_page_widget_flash_annotation(ZathuraPageWidget* widget, const char* annotation_id);
+
+/**
+ * Set, query, or clear the selection snapshot used for right-click highlight actions
+ */
+void zathura_page_widget_set_selection_snapshot(ZathuraPageWidget* widget, girara_list_t* rectangles, const char* text);
+bool zathura_page_widget_has_selection_snapshot(ZathuraPageWidget* widget);
+void zathura_page_widget_clear_selection_snapshot(ZathuraPageWidget* widget);
+const char* zathura_page_widget_get_hovered_annotation_id(ZathuraPageWidget* widget);
+void zathura_page_widget_set_hovered_annotation_id(ZathuraPageWidget* widget, const char* id);
+
 /* scaled-button-release signal payload */
 typedef struct scaled_button_release_event_s {
   double x;              /**< x in page coordinates */

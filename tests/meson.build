@@ -2,6 +2,9 @@
 env = [
   'G_TEST_SRCDIR=@0@'.format(meson.current_source_dir()),
   'G_TEST_BUILDDIR=@0@'.format(meson.current_build_dir()),
+  'XDG_CONFIG_HOME=@0@'.format(meson.current_build_dir()),
+  'GTK_IM_MODULE=gtk-im-context-simple',
+  'GSK_RENDERER=cairo',
 ]
 
 test_dependencies = [
@@ -43,6 +46,28 @@ test('utils', utils,
   env: env
 )
 
+annotations_model = executable('test_annotations_model', files('test_annotations_model.c'),
+  dependencies: build_dependencies + test_dependencies,
+  include_directories: include_directories,
+  c_args: defines + flags
+)
+test('annotations_model', annotations_model,
+  timeout: 60*60,
+  protocol: 'tap',
+  env: env
+)
+
+annotations_pdf = executable('test_annotations_pdf', files('test_annotations_pdf.c'),
+  dependencies: build_dependencies + test_dependencies,
+  include_directories: include_directories,
+  c_args: defines + flags
+)
+test('annotations_pdf', annotations_pdf,
+  timeout: 60*60,
+  protocol: 'tap',
+  env: env
+)
+
 xvfb = find_program('xvfb-run', required: get_option('tests-x11'))
 weston = find_program('weston', required: get_option('tests-wayland'))
 if xvfb.found() or weston.found()
@@ -59,6 +84,18 @@ if xvfb.found() or weston.found()
   )
 
   setting = executable('test_setting', files('test_setting.c'),
+    dependencies: build_dependencies + test_dependencies,
+    include_directories: include_directories,
+    c_args: defines + flags
+  )
+
+  annotations_page = executable('test_annotations_page', files('test_annotations_page.c'),
+    dependencies: build_dependencies + test_dependencies,
+    include_directories: include_directories,
+    c_args: defines + flags
+  )
+
+  annotations_panel = executable('test_annotations_panel', files('test_annotations_panel.c'),
     dependencies: build_dependencies + test_dependencies,
     include_directories: include_directories,
     c_args: defines + flags
@@ -92,7 +129,7 @@ if xvfb.found()
     timeout: 60*60,
     is_parallel: false,
     protocol: 'tap',
-    env: [
+    env: env + [
       'NO_AT_BRIDGE=1',
       'GTK_A11Y=none',
       'MESA_LOG=null',
@@ -105,7 +142,33 @@ if xvfb.found()
     timeout: 60*60,
     is_parallel: false,
     protocol: 'tap',
-    env: [
+    env: env + [
+      'NO_AT_BRIDGE=1',
+      'GTK_A11Y=none',
+      'MESA_LOG=null',
+      'LIBGL_DEBUG=quiet',
+      'EGL_LOG_LEVEL=fatal'
+    ]
+  )
+  test('xvfb_annotations_page', xvfb,
+    args: xvfb_args + [annotations_page],
+    timeout: 60*60,
+    is_parallel: false,
+    protocol: 'tap',
+    env: env + [
+      'NO_AT_BRIDGE=1',
+      'GTK_A11Y=none',
+      'MESA_LOG=null',
+      'LIBGL_DEBUG=quiet',
+      'EGL_LOG_LEVEL=fatal'
+    ]
+  )
+  test('xvfb_annotations_panel', xvfb,
+    args: xvfb_args + [annotations_panel],
+    timeout: 60*60,
+    is_parallel: false,
+    protocol: 'tap',
+    env: env + [
       'NO_AT_BRIDGE=1',
       'GTK_A11Y=none',
       'MESA_LOG=null',
@@ -141,6 +204,26 @@ if weston.found()
   )
   test('weston_setting', weston_session,
     args: [setting],
+    timeout: 60*60,
+    protocol: 'tap',
+    env: env + [
+      'NO_AT_BRIDGE=1',
+      'GTK_A11Y=none',
+      'WAYLAND_DISPLAY=zathura-test-weston'
+    ]
+  )
+  test('weston_annotations_page', weston_session,
+    args: [annotations_page],
+    timeout: 60*60,
+    protocol: 'tap',
+    env: env + [
+      'NO_AT_BRIDGE=1',
+      'GTK_A11Y=none',
+      'WAYLAND_DISPLAY=zathura-test-weston'
+    ]
+  )
+  test('weston_annotations_panel', weston_session,
+    args: [annotations_panel],
     timeout: 60*60,
     protocol: 'tap',
     env: env + [

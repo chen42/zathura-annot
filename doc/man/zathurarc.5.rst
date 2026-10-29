@@ -365,6 +365,10 @@ They can also be combined with modifiers:
 
     Toggle between displaying a page grid or a single page.
 
+  * ``toggle_annotations``
+
+    Show or hide the annotation and comment side panel.
+
   * ``toggle_statusbar``
 
     Show or hide statusbar.
@@ -652,6 +656,19 @@ The settings described here can be changed with ``set``.
 
   * Value type: Boolean
   * Default value: false
+
+*annotation-panel-open*
+  Defines whether the annotation and comment side panel should open automatically
+  when a document is loaded.
+
+  * Value type: Boolean
+  * Default value: false
+
+*annotation-panel-width*
+  Defines the width in pixels of the annotation and comment side panel.
+
+  * Value type: Integer
+  * Default value: 340
 
 *continuous-hist-save*
   Tells zathura whether to save document history at each page change or only when

@@ -15,6 +15,8 @@
 #include <math.h>
 
 #include "adjustment.h"
+#include "annotation-panel.h"
+#include "annotations.h"
 #include "callbacks.h"
 #include "commands.h"
 #include "database.h"
@@ -1395,7 +1397,8 @@ bool sc_toggle_index(girara_session_t* session, girara_argument_t* UNUSED(argume
   }
 
   if (girara_mode_get(session) == zathura->modes.index) {
-    girara_set_view(zathura->ui.session, zathura->ui.view);
+    girara_set_view(zathura->ui.session,
+                    zathura->ui.content_overlay != NULL ? zathura->ui.content_overlay : zathura->ui.view);
     girara_mode_set(zathura->ui.session, zathura->modes.normal);
     refresh_view(zathura);
   } else {
@@ -1603,6 +1606,25 @@ bool sc_toggle_single_page_mode(girara_session_t* session, girara_argument_t* UN
     girara_setting_set(zathura->ui.session, "pages-per-row", &pages_per_row);
   }
 
+  return true;
+}
+
+bool sc_toggle_annotations(girara_session_t* session, girara_argument_t* UNUSED(argument), girara_event_t* UNUSED(event),
+                           unsigned int UNUSED(t)) {
+  g_return_val_if_fail(session != NULL, false);
+  g_return_val_if_fail(session->global.data != NULL, false);
+  zathura_t* zathura = session->global.data;
+
+  if (zathura->ui.annotation_panel == NULL) {
+    return false;
+  }
+
+  bool visible = !gtk_widget_get_visible(zathura->ui.annotation_panel);
+  gtk_widget_set_visible(zathura->ui.annotation_panel, visible);
+  if (visible) {
+    zathura_annotation_panel_refresh(zathura->ui.annotation_panel);
+  }
+  zathura_annotations_queue_draw_all(zathura);
   return true;
 }
 
@@ -1909,5 +1931,28 @@ bool sc_file_chooser(girara_session_t* session, girara_argument_t* UNUSED(argume
 
   GtkWindow* parent = GTK_WINDOW(session->gtk.window);
   gtk_file_dialog_open(dialog, parent, NULL, cb_file_chooser_open, zathura);
+  return true;
+}
+
+bool sc_delete_annotation(girara_session_t* session, girara_argument_t* UNUSED(argument), girara_event_t* UNUSED(event),
+                          unsigned int UNUSED(t)) {
+  g_return_val_if_fail(session != NULL, false);
+  g_return_val_if_fail(session->global.data != NULL, false);
+  zathura_t* zathura = session->global.data;
+
+  if (zathura->annotations.active_id == NULL) {
+    return false;
+  }
+
+  g_autofree char* id_copy = g_strdup(zathura->annotations.active_id);
+  if (!zathura_annotations_remove(zathura, id_copy)) {
+    return false;
+  }
+
+  zathura_annotations_mark_dirty(zathura);
+  if (zathura->ui.annotation_panel != NULL && gtk_widget_get_visible(zathura->ui.annotation_panel)) {
+    zathura_annotation_panel_refresh(zathura->ui.annotation_panel);
+  }
+  zathura_annotations_queue_draw_all(zathura);
   return true;
 }

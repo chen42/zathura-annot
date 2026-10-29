@@ -198,4 +198,13 @@ bool cmd_version(girara_session_t* session, girara_list_t* argument_list);
  */
 bool cmd_source(girara_session_t* session, girara_list_t* argument_list);
 
+/**
+ * Toggle the comment panel
+ *
+ * @param session The used girara session
+ * @param argument_list List of passed arguments
+ * @return true if no error occurred
+ */
+bool cmd_comments(girara_session_t* session, girara_list_t* argument_list);
+
 #endif // COMMANDS_H

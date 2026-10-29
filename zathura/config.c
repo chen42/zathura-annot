@@ -286,6 +286,21 @@ static void cb_scroll_step_value_changed(girara_session_t* session, const char* 
   }
 }
 
+static void cb_annotation_panel_width_changed(girara_session_t* session, const char* UNUSED(name),
+                                              girara_setting_type_t UNUSED(type), const void* value,
+                                              void* UNUSED(data)) {
+  g_return_if_fail(session != NULL && value != NULL);
+  zathura_t* zathura = session->global.data;
+  if (zathura == NULL || zathura->ui.annotation_panel == NULL) {
+    return;
+  }
+
+  int width = *(const int*)value;
+  if (width > 160) {
+    gtk_widget_set_size_request(zathura->ui.annotation_panel, width, -1);
+  }
+}
+
 static void add_default_shortcuts(girara_session_t* gsession, girara_mode_t mode) {
   girara_shortcut_add(gsession, 0, GDK_KEY_a, NULL, sc_adjust_window, mode, ZATHURA_ADJUST_BESTFIT, NULL);
   girara_shortcut_add(gsession, 0, GDK_KEY_s, NULL, sc_adjust_window, mode, ZATHURA_ADJUST_WIDTH, NULL);
@@ -399,6 +414,9 @@ static void add_default_shortcuts(girara_session_t* gsession, girara_mode_t mode
   girara_shortcut_add(gsession, 0, 0, "zZ", sc_zoom, mode, ZOOM_SPECIFIC, NULL);
 
   girara_shortcut_add(gsession, GDK_ALT_MASK, GDK_KEY_o, NULL, sc_file_chooser, mode, 0, NULL);
+  girara_shortcut_add(gsession, GDK_CONTROL_MASK | GDK_ALT_MASK, GDK_KEY_c, NULL, sc_toggle_annotations, mode, 0, NULL);
+  girara_shortcut_add(gsession, 0, GDK_KEY_Delete, NULL, sc_delete_annotation, mode, 0, NULL);
+  girara_shortcut_add(gsession, 0, GDK_KEY_BackSpace, NULL, sc_delete_annotation, mode, 0, NULL);
 }
 
 static void add_default_mouse_events(girara_session_t* gsession, girara_mode_t mode) {
@@ -615,6 +633,10 @@ void config_load_default(zathura_t* zathura) {
   girara_setting_add(gsession, "open-link-confirm",          &bool_value,  BOOLEAN, false, _("Enable prompt to confirm when opening links"), NULL, NULL);
   bool_value = false;
   girara_setting_add(gsession, "single-page-mode",           &bool_value,  BOOLEAN, false, _("Open documents in single-page mode"), NULL, NULL);
+  int_value = 340;
+  girara_setting_add(gsession, "annotation-panel-width",     &int_value,   INT,     false, _("Width of the annotation panel in pixels"), cb_annotation_panel_width_changed, NULL);
+  bool_value = false;
+  girara_setting_add(gsession, "annotation-panel-open",      &bool_value,  BOOLEAN, false, _("Open annotation panel automatically when opening a document"), NULL, NULL);
 
   // clang-format on
   // apply some color settings that need their callbacks to run
@@ -781,6 +803,7 @@ void config_load_default(zathura_t* zathura) {
   girara_inputbar_command_add(gsession, "hlsearch",   NULL,   cmd_hlsearch,            NULL,          _("Highlight current search results"));
   girara_inputbar_command_add(gsession, "version",    NULL,   cmd_version,             NULL,          _("Show version information"));
   girara_inputbar_command_add(gsession, "source",     NULL,   cmd_source,              NULL,          _("Source config file"));
+  girara_inputbar_command_add(gsession, "comments",   NULL,   cmd_comments,            NULL,          _("Toggle annotation and comment side panel"));
 
   girara_special_command_add(gsession, '/', cmd_search, INCREMENTAL_SEARCH, FORWARD,  NULL);
   girara_special_command_add(gsession, '?', cmd_search, INCREMENTAL_SEARCH, BACKWARD, NULL);
@@ -825,6 +848,7 @@ void config_load_default(zathura_t* zathura) {
   girara_shortcut_mapping_add(gsession, "toggle_page_mode",         sc_toggle_page_mode);
   girara_shortcut_mapping_add(gsession, "toggle_presentation",      sc_toggle_presentation);
   girara_shortcut_mapping_add(gsession, "toggle_single_page_mode",  sc_toggle_single_page_mode);
+  girara_shortcut_mapping_add(gsession, "toggle_annotations",       sc_toggle_annotations);
   girara_shortcut_mapping_add(gsession, "zoom",                     sc_zoom);
   girara_shortcut_mapping_add(gsession, "zoom_page",                sc_zoom_page);
 

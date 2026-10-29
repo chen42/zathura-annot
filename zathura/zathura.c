@@ -23,6 +23,9 @@
 #endif
 
 #include "bookmarks.h"
+#include "annotation-panel.h"
+#include "annotations-pdf.h"
+#include "annotations.h"
 #include "callbacks.h"
 #include "config.h"
 #include "commands.h"
@@ -126,6 +129,7 @@ zathura_t* zathura_create(void) {
   zathura->content_type_context = zathura_content_type_new();
 
   zathura->ui.session->global.data = zathura;
+  zathura_annotations_init(zathura);
 
   return g_steal_pointer(&zathura);
 }
@@ -218,8 +222,11 @@ static bool init_ui(zathura_t* zathura) {
   gtk_widget_add_controller(GTK_WIDGET(zathura->ui.session->gtk.view), GTK_EVENT_CONTROLLER(drop_target));
 
   /* zathura signals */
-  zathura->signals.refresh_view = g_signal_new("refresh-view", GTK_TYPE_WIDGET, G_SIGNAL_RUN_LAST, 0, NULL, NULL,
-                                               g_cclosure_marshal_generic, G_TYPE_NONE, 1, G_TYPE_POINTER);
+  zathura->signals.refresh_view = g_signal_lookup("refresh-view", GTK_TYPE_WIDGET);
+  if (zathura->signals.refresh_view == 0) {
+    zathura->signals.refresh_view = g_signal_new("refresh-view", GTK_TYPE_WIDGET, G_SIGNAL_RUN_LAST, 0, NULL, NULL,
+                                                 g_cclosure_marshal_generic, G_TYPE_NONE, 1, G_TYPE_POINTER);
+  }
 
   g_signal_connect(G_OBJECT(zathura->ui.session->gtk.view), "refresh-view", G_CALLBACK(cb_refresh_view), zathura);
 
@@ -246,8 +253,15 @@ static bool init_ui(zathura_t* zathura) {
   gtk_widget_add_controller(zathura->ui.session->gtk.inputbar, inputbar_focus);
 
   /* page view */
-  zathura->ui.view = gtk_scrolled_window_new();
-  girara_set_view(zathura->ui.session, zathura->ui.view);
+  zathura->ui.view             = gtk_scrolled_window_new();
+  zathura->ui.content_overlay  = gtk_overlay_new();
+  gtk_overlay_set_child(GTK_OVERLAY(zathura->ui.content_overlay), zathura->ui.view);
+  zathura->ui.annotation_panel = zathura_annotation_panel_new(zathura);
+  gtk_overlay_add_overlay(GTK_OVERLAY(zathura->ui.content_overlay), zathura->ui.annotation_panel);
+  bool show_panel_on_open = false;
+  girara_setting_get(zathura->ui.session, "annotation-panel-open", &show_panel_on_open);
+  gtk_widget_set_visible(zathura->ui.annotation_panel, show_panel_on_open);
+  girara_set_view(zathura->ui.session, zathura->ui.content_overlay);
 
   /* load scrollbar settings */
   g_autofree char* view_options = NULL;
@@ -508,6 +522,9 @@ void zathura_free(zathura_t* zathura) {
 
   /* bookmarks */
   zathura_bookmarks_free(zathura);
+
+  /* annotations */
+  zathura_annotations_free(zathura);
 
   /* database */
   g_clear_object(&zathura->database);
@@ -1108,6 +1125,9 @@ bool document_open(zathura_t* zathura, const char* path, const char* uri, const 
     zathura->global.marks = girara_list_new_with_free(g_free);
   }
 
+  /* annotations */
+  zathura_annotations_load_pdf(zathura, file_path, password);
+
   if (zathura_jumplist_is_initialized(zathura) == false || zathura->global.marks == NULL) {
     girara_error("No jumplist or no marks");
     goto error_free;
@@ -1227,7 +1247,8 @@ bool document_open(zathura_t* zathura, const char* path, const char* uri, const 
 
   /* page widgets are created on demand, not all at once */
   zathura_document_widget_ensure_page(zathura->ui.document_widget, zathura_document_get_current_page_number(document));
-  girara_set_view(zathura->ui.session, zathura->ui.view);
+  girara_set_view(zathura->ui.session,
+                  zathura->ui.content_overlay != NULL ? zathura->ui.content_overlay : zathura->ui.view);
 
   /* get view port size */
   GtkAdjustment* hadjustment = gtk_scrolled_window_get_hadjustment(GTK_SCROLLED_WINDOW(zathura->ui.view));
@@ -1366,6 +1387,10 @@ bool document_save(zathura_t* zathura, const char* path, bool overwrite) {
     return false;
   }
 
+  if (zathura->annotations.list != NULL && (zathura->annotations.dirty || girara_list_size(zathura->annotations.list) > 0)) {
+    zathura_annotations_save_pdf(zathura, file_path);
+  }
+
   girara_notify(zathura->ui.session, GIRARA_INFO, _("Document saved."));
   return true;
 }
@@ -1486,6 +1511,14 @@ bool document_close(zathura_t* zathura, bool keep_monitor) {
 
   /* store file information */
   save_fileinfo_to_db(zathura);
+
+  if (zathura->annotations.dirty) {
+    zathura_annotations_save_pdf(zathura, NULL);
+  }
+  zathura_annotations_clear(zathura);
+  if (zathura->ui.annotation_panel != NULL) {
+    zathura_annotation_panel_refresh(zathura->ui.annotation_panel);
+  }
 
   /* remove marks */
   if (zathura->global.marks != NULL) {

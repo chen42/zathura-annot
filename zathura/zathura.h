@@ -117,6 +117,8 @@ struct zathura_s {
     } colors;
 
     GtkWidget* view;                            /**< Scrolled Window */
+    GtkWidget* content_overlay;                 /**< GtkOverlay wrapping view and annotation_panel */
+    GtkWidget* annotation_panel;                /**< Right-docked comment panel */
     ZathuraDocumentWidget* document_widget;     /**< Widget that contains all rendered pages */
     GtkWidget* index;                           /**< Widget to show the index of the document */
     zathura_adjust_mode_t inputbar_adjust_mode; /**< Adjustment mode before focusing the inputbar */
@@ -174,6 +176,18 @@ struct zathura_s {
   struct {
     girara_list_t* bookmarks; /**< bookmarks */
   } bookmarks;
+
+  struct {
+    girara_list_t* list;      /**< Owned zathura_annotation_t* sorted by page/y/x */
+    GPtrArray* by_page;       /**< Per-page GPtrArray* of borrowed zathura_annotation_t* */
+    char* active_id;          /**< Selected annotation ID */
+    char* editing_id;         /**< Annotation currently open in an editor */
+    char* draft_comment;      /**< Unsaved comment buffer */
+    bool draft_is_new;        /**< Cancel removes annotation if created via "Add comment" */
+    bool dirty;               /**< True when annotations have unsaved changes */
+    guint autosave_source_id; /**< GSource timer ID for debounced PDF autosave */
+    guint64 next_id_counter;  /**< Counter for generating unique in-memory IDs */
+  } annotations;
 
   zathura_jumplist_t jumplist;
 

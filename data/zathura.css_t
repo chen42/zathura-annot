@@ -31,3 +31,198 @@
   background-color: @scrollbar-fg@;
 }
 
+/* Annotation and comment side panel */
+#@session@ .annotation-panel {
+  background-color: rgba(28, 28, 32, 0.96);
+  color: #dcdce4;
+  border-left: 1px solid rgba(255, 255, 255, 0.10);
+}
+
+#@session@ .annotation-panel-header {
+  padding: 6px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+  color: #dcdce4;
+  font-size: 0.88em;
+}
+
+#@session@ .annotation-panel-title {
+  font-weight: bold;
+  color: #ededf2;
+}
+
+#@session@ .annotation-header-check {
+  color: #dcdce4;
+  font-size: 0.84em;
+}
+
+#@session@ .annotation-header-check label {
+  color: #dcdce4;
+}
+
+#@session@ .annotation-count-badge {
+  background-color: rgba(255, 255, 255, 0.12);
+  color: #ededf2;
+  border-radius: 999px;
+  padding: 1px 7px;
+  font-size: 0.82em;
+}
+
+#@session@ .annotation-panel-list {
+  background-color: transparent;
+}
+
+#@session@ .annotation-card {
+  background-color: rgba(40, 40, 46, 0.94);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  margin: 5px 8px;
+  padding: 7px 9px;
+}
+
+#@session@ .annotation-card.yellow {
+  border-left: 3px solid #d8b228;
+}
+
+#@session@ .annotation-card.red {
+  border-left: 3px solid #dc5050;
+}
+
+#@session@ .annotation-card.active {
+  background-color: rgba(68, 68, 78, 0.98);
+  border-top-color: rgba(253, 224, 71, 0.65);
+  border-right-color: rgba(253, 224, 71, 0.65);
+  border-bottom-color: rgba(253, 224, 71, 0.65);
+}
+
+#@session@ .annotation-card.yellow.active {
+  border-left: 3px solid #fde047;
+}
+
+#@session@ .annotation-card.red.active {
+  border-top-color: rgba(255, 107, 107, 0.65);
+  border-right-color: rgba(255, 107, 107, 0.65);
+  border-bottom-color: rgba(255, 107, 107, 0.65);
+  border-left: 3px solid #ff6b6b;
+}
+
+#@session@ .annotation-card.resolved {
+  opacity: 0.68;
+}
+
+#@session@ .annotation-color-dot {
+  border-radius: 3px;
+  min-width: 6px;
+  min-height: 6px;
+}
+
+#@session@ .annotation-color-dot.yellow {
+  background-color: #d8b228;
+}
+
+#@session@ .annotation-color-dot.red {
+  background-color: #dc5050;
+}
+
+#@session@ .annotation-card.active .annotation-color-dot.yellow {
+  background-color: #fde047;
+}
+
+#@session@ .annotation-card.active .annotation-color-dot.red {
+  background-color: #ff6b6b;
+}
+
+#@session@ .annotation-card-actions {
+  margin-top: 2px;
+}
+
+#@session@ button.annotation-card-btn {
+  font-size: 0.70em;
+  font-weight: normal;
+  min-height: 12px;
+  min-width: 0px;
+  padding: 1px 5px;
+  margin: 0px;
+  border-radius: 3px;
+  background-image: none;
+  background-color: rgba(255, 255, 255, 0.06);
+  color: #f8f8fc;
+  opacity: 1.0;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  box-shadow: none;
+  outline: none;
+}
+
+#@session@ button.annotation-card-btn label {
+  font-size: inherit;
+  font-weight: normal;
+  color: #f8f8fc;
+  opacity: 1.0;
+  padding: 0px;
+  margin: 0px;
+}
+
+#@session@ button.annotation-close-btn {
+  font-size: 1.05em;
+}
+
+#@session@ button.annotation-close-btn label {
+  font-size: inherit;
+}
+
+#@session@ .annotation-card.active button.annotation-card-btn,
+#@session@ .annotation-card.active button.annotation-card-btn label {
+  color: #ffffff;
+}
+
+#@session@ button.annotation-card-btn:hover,
+#@session@ button.annotation-card-btn:hover label {
+  background-image: none;
+  background-color: rgba(255, 255, 255, 0.14);
+  color: #ffffff;
+}
+
+#@session@ button.annotation-card-btn:active,
+#@session@ button.annotation-card-btn:active label {
+  background-image: none;
+  background-color: rgba(255, 255, 255, 0.20);
+  color: #ffffff;
+}
+
+#@session@ .annotation-page-badge {
+  font-weight: normal;
+}
+
+#@session@ .annotation-quote {
+  color: rgba(205, 205, 215, 0.85);
+  font-style: italic;
+  font-size: 0.88em;
+}
+
+#@session@ .annotation-card.active .annotation-quote {
+  color: #f4f4f6;
+}
+
+#@session@ .annotation-comment-body {
+  color: #e4e4ec;
+}
+
+#@session@ .annotation-card.active .annotation-comment-body {
+  color: #ffffff;
+}
+
+#@session@ .annotation-editor {
+  background-color: rgba(22, 22, 26, 0.96);
+  color: #f4f4f6;
+  border: 1px solid rgba(255, 255, 255, 0.20);
+  border-radius: 5px;
+  padding: 5px;
+}
+
+#@session@ .annotation-empty-state {
+  color: rgba(185, 185, 195, 0.82);
+  padding: 20px 14px;
+}
+
+

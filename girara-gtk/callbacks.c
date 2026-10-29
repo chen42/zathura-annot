@@ -17,9 +17,26 @@ static const guint ALL_ACCELS_MASK = GDK_CONTROL_MASK | GDK_SHIFT_MASK | GDK_ALT
 static const guint MOUSE_MASK = GDK_CONTROL_MASK | GDK_SHIFT_MASK | GDK_ALT_MASK | GDK_BUTTON1_MASK | GDK_BUTTON2_MASK |
                                 GDK_BUTTON3_MASK | GDK_BUTTON4_MASK | GDK_BUTTON5_MASK;
 
+static bool widget_in_annotation_panel(GtkWidget* widget) {
+  for (GtkWidget* cur = widget; cur != NULL; cur = gtk_widget_get_parent(cur)) {
+    if (gtk_widget_has_css_class(cur, "annotation-panel")) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool point_in_annotation_panel(girara_session_t* session, double x, double y) {
+  if (session == NULL || session->gtk.view == NULL) {
+    return false;
+  }
+  GtkWidget* picked = gtk_widget_pick(session->gtk.view, x, y, GTK_PICK_DEFAULT);
+  return widget_in_annotation_panel(picked);
+}
+
 bool girara_clean_key_mask(GtkEventControllerKey* controller, GdkModifierType state, guint* clean, guint* keyval) {
   GdkModifierType consumed = 0;
-  GdkEvent* event          = gtk_event_controller_get_current_event(GTK_EVENT_CONTROLLER(controller));
+  GdkEvent* event = controller != NULL ? gtk_event_controller_get_current_event(GTK_EVENT_CONTROLLER(controller)) : NULL;
   if (event != NULL && gdk_event_get_event_type(event) == GDK_KEY_PRESS) {
     consumed = gdk_key_event_get_consumed_modifiers(event);
   }
@@ -82,6 +99,13 @@ gboolean girara_callback_view_key_press_event(GtkEventControllerKey* controller,
 
 gboolean girara_process_view_key(girara_session_t* session, guint keyval, guint clean) {
   g_return_val_if_fail(session != NULL, FALSE);
+
+  if (session->gtk.window != NULL) {
+    GtkWidget* focus = gtk_window_get_focus(GTK_WINDOW(session->gtk.window));
+    if (widget_in_annotation_panel(focus)) {
+      return FALSE;
+    }
+  }
 
   girara_session_private_t* session_private = session->private_data;
 
@@ -224,6 +248,10 @@ gboolean girara_callback_view_button_press_event(GtkGestureClick* gesture, gint 
                                                  girara_session_t* session) {
   g_return_val_if_fail(session != NULL, false);
 
+  if (point_in_annotation_panel(session, x, y)) {
+    return false;
+  }
+
   girara_event_t event = {.x = x, .y = y};
 
   if (n_press == 2) {
@@ -259,6 +287,10 @@ gboolean girara_callback_view_button_release_event(GtkGestureClick* gesture, gin
                                                    girara_session_t* session) {
   g_return_val_if_fail(session != NULL, false);
 
+  if (point_in_annotation_panel(session, x, y)) {
+    return false;
+  }
+
   girara_event_t event = {.type = GIRARA_EVENT_BUTTON_RELEASE, .x = x, .y = y};
 
   const guint gbutton  = gtk_gesture_single_get_current_button(GTK_GESTURE_SINGLE(gesture));
@@ -282,6 +314,10 @@ gboolean girara_callback_view_button_release_event(GtkGestureClick* gesture, gin
 
 static gboolean dispatch_mouse_motion(girara_session_t* session, double x, double y, GdkModifierType mods) {
   g_return_val_if_fail(session != NULL, false);
+
+  if (point_in_annotation_panel(session, x, y)) {
+    return false;
+  }
 
   girara_event_t event = {.type = GIRARA_EVENT_MOTION_NOTIFY, .x = x, .y = y};
 
@@ -360,6 +396,9 @@ gboolean girara_callback_view_scroll_event(GtkEventControllerScroll* controller,
 
   girara_event_t event = {.x = 0, .y = 0};
   scroll_event_position(controller, &event.x, &event.y);
+  if (point_in_annotation_panel(session, event.x, event.y)) {
+    return false;
+  }
 
 #ifdef __APPLE__
   /* Apple has much higher deltas */

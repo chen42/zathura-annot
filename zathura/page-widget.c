@@ -14,6 +14,8 @@
 #include "links-internal.h"
 #include "page.h"
 #include "adjustment.h"
+#include "annotation-panel.h"
+#include "annotations.h"
 #include "render.h"
 #include "utils.h"
 #include "shortcuts.h"
@@ -69,9 +71,24 @@ typedef struct zathura_page_widget_private_s {
     gboolean draw;       /**< True if links should be drawn */
   } signatures;
 
-  GtkWidget* drawing_area;           /**< child layer that draws the page */
-  GtkWidget* image_popover;          /**< lazily created image context menu */
-  GSimpleActionGroup* image_actions; /**< action group for the image popup */
+  struct {
+    zathura_rectangle_t bounds; /**< Normalized selection bounds in page points */
+    girara_list_t* rectangles;  /**< Deep-copied zathura_rectangle_t* list */
+    char* text;                 /**< Selected text string */
+    bool valid;                 /**< True while a selection snapshot is available */
+  } selection_snapshot;
+
+  GtkWidget* drawing_area;              /**< child layer that draws the page */
+  GtkWidget* image_popover;             /**< lazily created image context menu */
+  GSimpleActionGroup* image_actions;    /**< action group for the image popup */
+  GtkWidget* selection_popover;         /**< Context popover for active text selection */
+  GtkWidget* annotation_popover;        /**< Context popover for existing annotation */
+  GSimpleActionGroup* annotation_actions;
+  char* context_annotation_id;          /**< Annotation targeted by annotation_popover */
+  char* hovered_annotation_id;          /**< Annotation currently under mouse cursor */
+  char* pulse_annotation_id;            /**< Annotation currently pulsing after reveal */
+  gint64 pulse_start_us;                /**< Pulse start time (g_get_monotonic_time) */
+  guint pulse_tick_id;                  /**< gtk_widget_add_tick_callback ID */
 } ZathuraPageWidgetPrivate;
 
 G_DEFINE_TYPE_WITH_CODE(ZathuraPageWidget, zathura_page_widget, GTK_TYPE_WIDGET, G_ADD_PRIVATE(ZathuraPageWidget))
@@ -85,6 +102,15 @@ static void evaluate_link_at_mouse_position(ZathuraPageWidget* widget, int oldx,
 static void zathura_page_widget_popup_menu(GtkWidget* widget, double x, double y);
 static void cb_menu_image_copy(GSimpleAction* action, GVariant* parameter, gpointer data);
 static void cb_menu_image_save(GSimpleAction* action, GVariant* parameter, gpointer data);
+static void cb_menu_annotation_yellow(GSimpleAction* action, GVariant* parameter, gpointer data);
+static void cb_menu_annotation_red(GSimpleAction* action, GVariant* parameter, gpointer data);
+static void cb_menu_annotation_comment(GSimpleAction* action, GVariant* parameter, gpointer data);
+static void cb_menu_annotation_edit(GSimpleAction* action, GVariant* parameter, gpointer data);
+static void cb_menu_annotation_recolor_yellow(GSimpleAction* action, GVariant* parameter, gpointer data);
+static void cb_menu_annotation_recolor_red(GSimpleAction* action, GVariant* parameter, gpointer data);
+static void cb_menu_annotation_toggle_resolved(GSimpleAction* action, GVariant* parameter, gpointer data);
+static void cb_menu_annotation_delete(GSimpleAction* action, GVariant* parameter, gpointer data);
+static void cb_menu_annotation_remove_selected(GSimpleAction* action, GVariant* parameter, gpointer data);
 static void cb_zathura_page_widget_button_press_event(GtkGestureClick* gesture, gint n_press, gdouble x, gdouble y,
                                                       gpointer data);
 static void cb_zathura_page_widget_button_release_event(GtkGestureClick* gesture, gint n_press, gdouble x, gdouble y,
@@ -258,6 +284,22 @@ static void zathura_page_widget_init(ZathuraPageWidget* widget) {
   g_action_map_add_action_entries(G_ACTION_MAP(priv->image_actions), image_action_entries,
                                   G_N_ELEMENTS(image_action_entries), widget);
   gtk_widget_insert_action_group(GTK_WIDGET(widget), "image", G_ACTION_GROUP(priv->image_actions));
+
+  static const GActionEntry annotation_action_entries[] = {
+      {"yellow", cb_menu_annotation_yellow, NULL, NULL, NULL, {0, 0, 0}},
+      {"red", cb_menu_annotation_red, NULL, NULL, NULL, {0, 0, 0}},
+      {"comment", cb_menu_annotation_comment, NULL, NULL, NULL, {0, 0, 0}},
+      {"edit", cb_menu_annotation_edit, NULL, NULL, NULL, {0, 0, 0}},
+      {"recolor-yellow", cb_menu_annotation_recolor_yellow, NULL, NULL, NULL, {0, 0, 0}},
+      {"recolor-red", cb_menu_annotation_recolor_red, NULL, NULL, NULL, {0, 0, 0}},
+      {"toggle-resolved", cb_menu_annotation_toggle_resolved, NULL, NULL, NULL, {0, 0, 0}},
+      {"delete", cb_menu_annotation_delete, NULL, NULL, NULL, {0, 0, 0}},
+      {"remove-selected", cb_menu_annotation_remove_selected, NULL, NULL, NULL, {0, 0, 0}},
+  };
+  priv->annotation_actions = g_simple_action_group_new();
+  g_action_map_add_action_entries(G_ACTION_MAP(priv->annotation_actions), annotation_action_entries,
+                                  G_N_ELEMENTS(annotation_action_entries), widget);
+  gtk_widget_insert_action_group(GTK_WIDGET(widget), "annotation", G_ACTION_GROUP(priv->annotation_actions));
 }
 
 GtkWidget* zathura_page_widget_new(zathura_t* zathura, zathura_page_t* page) {
@@ -270,10 +312,12 @@ GtkWidget* zathura_page_widget_new(zathura_t* zathura, zathura_page_t* page) {
 
   ZathuraPageWidget* widget      = ZATHURA_PAGE_WIDGET(ret);
   ZathuraPageWidgetPrivate* priv = zathura_page_widget_get_instance_private(widget);
-  priv->render_request           = zathura_render_request_new(zathura->sync.render_thread, page);
-  g_signal_connect_object(priv->render_request, "completed", G_CALLBACK(cb_update_surface), widget, 0);
-  g_signal_connect_object(priv->render_request, "cache-added", G_CALLBACK(cb_cache_added), widget, 0);
-  g_signal_connect_object(priv->render_request, "cache-invalidated", G_CALLBACK(cb_cache_invalidated), widget, 0);
+  if (zathura != NULL && zathura->sync.render_thread != NULL) {
+    priv->render_request = zathura_render_request_new(zathura->sync.render_thread, page);
+    g_signal_connect_object(priv->render_request, "completed", G_CALLBACK(cb_update_surface), widget, 0);
+    g_signal_connect_object(priv->render_request, "cache-added", G_CALLBACK(cb_cache_added), widget, 0);
+    g_signal_connect_object(priv->render_request, "cache-invalidated", G_CALLBACK(cb_cache_invalidated), widget, 0);
+  }
 
   return GTK_WIDGET(ret);
 }
@@ -282,9 +326,17 @@ static void zathura_page_widget_dispose(GObject* object) {
   ZathuraPageWidget* widget      = ZATHURA_PAGE_WIDGET(object);
   ZathuraPageWidgetPrivate* priv = zathura_page_widget_get_instance_private(widget);
 
+  if (priv->pulse_tick_id > 0) {
+    gtk_widget_remove_tick_callback(GTK_WIDGET(widget), priv->pulse_tick_id);
+    priv->pulse_tick_id = 0;
+  }
+
   g_clear_object(&priv->render_request);
   g_clear_pointer(&priv->image_popover, gtk_widget_unparent);
   g_clear_object(&priv->image_actions);
+  g_clear_pointer(&priv->selection_popover, gtk_widget_unparent);
+  g_clear_pointer(&priv->annotation_popover, gtk_widget_unparent);
+  g_clear_object(&priv->annotation_actions);
   g_clear_pointer(&priv->drawing_area, gtk_widget_unparent);
 
   G_OBJECT_CLASS(zathura_page_widget_parent_class)->dispose(object);
@@ -293,6 +345,11 @@ static void zathura_page_widget_dispose(GObject* object) {
 static void zathura_page_widget_finalize(GObject* object) {
   ZathuraPageWidget* widget      = ZATHURA_PAGE_WIDGET(object);
   ZathuraPageWidgetPrivate* priv = zathura_page_widget_get_instance_private(widget);
+
+  zathura_page_widget_clear_selection_snapshot(widget);
+  g_clear_pointer(&priv->context_annotation_id, g_free);
+  g_clear_pointer(&priv->hovered_annotation_id, g_free);
+  g_clear_pointer(&priv->pulse_annotation_id, g_free);
 
   cairo_surface_destroy(priv->surface);
   cairo_surface_destroy(priv->thumbnail);
@@ -588,6 +645,11 @@ static void cb_page_draw(GtkDrawingArea* GIRARA_UNUSED(area), cairo_t* cairo, in
       }
       return;
     }
+
+    /* draw annotations */
+    const bool comment_panel_visible =
+        (zathura->ui.annotation_panel != NULL && gtk_widget_get_visible(zathura->ui.annotation_panel));
+    zathura_page_widget_draw_annotations(page, cairo, zathura_document_get_scale(document), comment_panel_visible);
 
     /* draw links */
     set_font_from_property(cairo, zathura, CAIRO_FONT_WEIGHT_BOLD);
@@ -1014,6 +1076,263 @@ void zathura_page_widget_clear_selection(ZathuraPageWidget* widget) {
   zathura_page_widget_redraw_canvas(widget);
 }
 
+void zathura_page_widget_set_selection_snapshot(ZathuraPageWidget* widget, girara_list_t* rectangles, const char* text) {
+  g_return_if_fail(ZATHURA_IS_PAGE_WIDGET(widget));
+
+  ZathuraPageWidgetPrivate* priv = zathura_page_widget_get_instance_private(widget);
+  zathura_page_widget_clear_selection_snapshot(widget);
+
+  if (rectangles == NULL || girara_list_size(rectangles) == 0 || text == NULL || text[0] == '\0') {
+    return;
+  }
+
+  priv->selection_snapshot.rectangles = zathura_annotation_rectangles_copy(rectangles);
+  priv->selection_snapshot.bounds     = zathura_annotation_get_bounds(priv->selection_snapshot.rectangles);
+  priv->selection_snapshot.text       = g_strdup(text);
+  priv->selection_snapshot.valid      = true;
+}
+
+bool zathura_page_widget_has_selection_snapshot(ZathuraPageWidget* widget) {
+  g_return_val_if_fail(ZATHURA_IS_PAGE_WIDGET(widget), false);
+
+  ZathuraPageWidgetPrivate* priv = zathura_page_widget_get_instance_private(widget);
+  return priv->selection_snapshot.valid;
+}
+
+void zathura_page_widget_clear_selection_snapshot(ZathuraPageWidget* widget) {
+  g_return_if_fail(ZATHURA_IS_PAGE_WIDGET(widget));
+
+  ZathuraPageWidgetPrivate* priv = zathura_page_widget_get_instance_private(widget);
+  if (priv->selection_snapshot.rectangles != NULL) {
+    girara_list_free(priv->selection_snapshot.rectangles);
+    priv->selection_snapshot.rectangles = NULL;
+  }
+  g_clear_pointer(&priv->selection_snapshot.text, g_free);
+  priv->selection_snapshot.bounds = (zathura_rectangle_t){0.0, 0.0, 0.0, 0.0};
+  priv->selection_snapshot.valid  = false;
+}
+
+const char* zathura_page_widget_get_hovered_annotation_id(ZathuraPageWidget* widget) {
+  g_return_val_if_fail(ZATHURA_IS_PAGE_WIDGET(widget), NULL);
+
+  ZathuraPageWidgetPrivate* priv = zathura_page_widget_get_instance_private(widget);
+  return priv->hovered_annotation_id;
+}
+
+void zathura_page_widget_set_hovered_annotation_id(ZathuraPageWidget* widget, const char* id) {
+  g_return_if_fail(ZATHURA_IS_PAGE_WIDGET(widget));
+
+  ZathuraPageWidgetPrivate* priv = zathura_page_widget_get_instance_private(widget);
+  if (g_strcmp0(priv->hovered_annotation_id, id) == 0) {
+    return;
+  }
+
+  g_autofree char* id_copy = (id != NULL) ? g_strdup(id) : NULL;
+  g_free(priv->hovered_annotation_id);
+  priv->hovered_annotation_id = g_steal_pointer(&id_copy);
+  zathura_page_widget_redraw_canvas(widget);
+}
+
+static zathura_rectangle_t scale_annotation_rect(zathura_t* zathura, zathura_page_t* page, zathura_rectangle_t rect,
+                                                 double scale) {
+  if (zathura != NULL && zathura->document != NULL && page != NULL) {
+    zathura_document_t* doc = zathura_page_get_document(page);
+    if (doc != NULL && fabs(scale - zathura_document_get_scale(doc)) < 1e-6) {
+      return recalc_rectangle(page, rect);
+    }
+  }
+  const double s         = (scale > 0.0) ? scale : 1.0;
+  zathura_rectangle_t sc = {
+      .x1 = rect.x1 * s,
+      .y1 = rect.y1 * s,
+      .x2 = rect.x2 * s,
+      .y2 = rect.y2 * s,
+  };
+  return sc;
+}
+
+void zathura_page_widget_draw_annotations(ZathuraPageWidget* widget, cairo_t* cairo, double scale,
+                                          bool comment_panel_visible) {
+  g_return_if_fail(ZATHURA_IS_PAGE_WIDGET(widget));
+  g_return_if_fail(cairo != NULL);
+
+  ZathuraPageWidgetPrivate* priv = zathura_page_widget_get_instance_private(widget);
+  if (priv->zathura == NULL || priv->page == NULL) {
+    return;
+  }
+
+  unsigned int page_idx = zathura_page_get_index(priv->page);
+  GPtrArray* page_anns  = zathura_annotations_get_for_page(priv->zathura, page_idx);
+  if (page_anns == NULL || page_anns->len == 0) {
+    return;
+  }
+
+  cairo_save(cairo);
+
+  for (guint i = 0; i < page_anns->len; ++i) {
+    zathura_annotation_t* ann = g_ptr_array_index(page_anns, i);
+    if (ann == NULL) {
+      continue;
+    }
+
+    const bool is_red      = (ann->color == ZATHURA_ANNOTATION_COLOR_RED);
+    const bool is_active   = (g_strcmp0(ann->id, priv->zathura->annotations.active_id) == 0);
+    const bool is_hovered  = (g_strcmp0(ann->id, priv->hovered_annotation_id) == 0);
+    const bool is_selected = (is_active || is_hovered);
+    const bool is_pulsing =
+        (priv->pulse_annotation_id != NULL && g_strcmp0(ann->id, priv->pulse_annotation_id) == 0);
+
+    /* 1. Highlight background fill (unless already baked into surface by poppler_page_render) */
+    if (!ann->baked_in_surface) {
+      if (is_red) {
+        if (is_selected) {
+          cairo_set_source_rgba(cairo, 1.0, 0.22, 0.22, 0.48);
+        } else {
+          cairo_set_source_rgba(cairo, 1.0, 0.30, 0.30, 0.36);
+        }
+      } else {
+        if (is_selected) {
+          cairo_set_source_rgba(cairo, 1.0, 0.97, 0.02, 0.52);
+        } else {
+          cairo_set_source_rgba(cairo, 1.0, 0.93, 0.10, 0.40);
+        }
+      }
+
+      if (ann->rectangles != NULL && girara_list_size(ann->rectangles) > 0) {
+        for (size_t r_idx = 0; r_idx != girara_list_size(ann->rectangles); ++r_idx) {
+          zathura_rectangle_t* rect = girara_list_nth(ann->rectangles, r_idx);
+          if (rect == NULL) {
+            continue;
+          }
+          zathura_rectangle_t sr = scale_annotation_rect(priv->zathura, priv->page, *rect, scale);
+          cairo_rectangle(cairo, sr.x1, sr.y1, sr.x2 - sr.x1, sr.y2 - sr.y1);
+          cairo_fill(cairo);
+        }
+      } else {
+        zathura_rectangle_t sr = scale_annotation_rect(priv->zathura, priv->page, ann->bounds, scale);
+        cairo_rectangle(cairo, sr.x1, sr.y1, sr.x2 - sr.x1, sr.y2 - sr.y1);
+        cairo_fill(cairo);
+      }
+    }
+
+    /* 2. Active / hovered outline (placed outside the highlight rectangle with brighter color) */
+    if (is_selected) {
+      cairo_set_line_width(cairo, 1.5);
+      if (is_red) {
+        cairo_set_source_rgba(cairo, 1.0, 0.24, 0.24, 0.95);
+      } else {
+        cairo_set_source_rgba(cairo, 1.0, 0.85, 0.04, 0.95);
+      }
+
+      if (ann->rectangles != NULL && girara_list_size(ann->rectangles) > 0) {
+        for (size_t r_idx = 0; r_idx != girara_list_size(ann->rectangles); ++r_idx) {
+          zathura_rectangle_t* rect = girara_list_nth(ann->rectangles, r_idx);
+          if (rect == NULL) {
+            continue;
+          }
+          zathura_rectangle_t sr = scale_annotation_rect(priv->zathura, priv->page, *rect, scale);
+          cairo_rectangle(cairo, sr.x1 - 1.5, sr.y1 - 1.5, (sr.x2 - sr.x1) + 3.0, (sr.y2 - sr.y1) + 3.0);
+          cairo_stroke(cairo);
+        }
+      } else {
+        zathura_rectangle_t sr = scale_annotation_rect(priv->zathura, priv->page, ann->bounds, scale);
+        cairo_rectangle(cairo, sr.x1 - 1.5, sr.y1 - 1.5, (sr.x2 - sr.x1) + 3.0, (sr.y2 - sr.y1) + 3.0);
+        cairo_stroke(cairo);
+      }
+    }
+
+    /* 3. Comment indicator box (smaller, placed outside top-right of the highlight box) */
+    if (comment_panel_visible && zathura_annotation_has_comment(ann)) {
+      zathura_rectangle_t first_rect = ann->bounds;
+      if (ann->rectangles != NULL && girara_list_size(ann->rectangles) > 0) {
+        zathura_rectangle_t* r0 = girara_list_nth(ann->rectangles, 0);
+        if (r0 != NULL) {
+          first_rect = *r0;
+        }
+      }
+      zathura_rectangle_t sr = scale_annotation_rect(priv->zathura, priv->page, first_rect, scale);
+      const double badge_sz  = 5.0;
+      const double bx        = sr.x2 + 2.0;
+      const double by        = MAX(0.0, sr.y1 - 2.0);
+
+      if (is_red) {
+        if (is_selected) {
+          cairo_set_source_rgba(cairo, 1.0, 0.22, 0.22, 1.0);
+        } else {
+          cairo_set_source_rgba(cairo, 0.92, 0.28, 0.28, 0.92);
+        }
+      } else {
+        if (is_selected) {
+          cairo_set_source_rgba(cairo, 1.0, 0.88, 0.04, 1.0);
+        } else {
+          cairo_set_source_rgba(cairo, 0.94, 0.76, 0.08, 0.92);
+        }
+      }
+      cairo_rectangle(cairo, bx, by, badge_sz, badge_sz);
+      cairo_fill(cairo);
+    }
+
+    /* 4. Reveal pulse outline */
+    if (is_pulsing) {
+      double elapsed = (double)(g_get_monotonic_time() - priv->pulse_start_us) / 360000.0;
+      if (elapsed < 0.0) {
+        elapsed = 0.0;
+      }
+      if (elapsed < 1.0) {
+        double alpha           = 0.95 * (1.0 - elapsed);
+        zathura_rectangle_t sr = scale_annotation_rect(priv->zathura, priv->page, ann->bounds, scale);
+        cairo_set_line_width(cairo, 2.0);
+        if (is_red) {
+          cairo_set_source_rgba(cairo, 1.0, 0.32, 0.32, alpha);
+        } else {
+          cairo_set_source_rgba(cairo, 1.0, 0.88, 0.08, alpha);
+        }
+        cairo_rectangle(cairo, sr.x1 - 3.5, sr.y1 - 3.5, (sr.x2 - sr.x1) + 7.0, (sr.y2 - sr.y1) + 7.0);
+        cairo_stroke(cairo);
+      }
+    }
+  }
+
+  cairo_restore(cairo);
+}
+
+static gboolean cb_annotation_pulse_tick(GtkWidget* widget, GdkFrameClock* UNUSED(frame_clock), gpointer UNUSED(data)) {
+  ZathuraPageWidget* page        = ZATHURA_PAGE_WIDGET(widget);
+  ZathuraPageWidgetPrivate* priv = zathura_page_widget_get_instance_private(page);
+
+  gint64 elapsed = g_get_monotonic_time() - priv->pulse_start_us;
+  zathura_page_widget_redraw_canvas(page);
+
+  if (elapsed >= 360000) {
+    g_clear_pointer(&priv->pulse_annotation_id, g_free);
+    priv->pulse_tick_id = 0;
+    return G_SOURCE_REMOVE;
+  }
+
+  return G_SOURCE_CONTINUE;
+}
+
+void zathura_page_widget_flash_annotation(ZathuraPageWidget* widget, const char* annotation_id) {
+  g_return_if_fail(ZATHURA_IS_PAGE_WIDGET(widget));
+
+  ZathuraPageWidgetPrivate* priv = zathura_page_widget_get_instance_private(widget);
+  if (priv->pulse_tick_id > 0) {
+    gtk_widget_remove_tick_callback(GTK_WIDGET(widget), priv->pulse_tick_id);
+    priv->pulse_tick_id = 0;
+  }
+
+  g_free(priv->pulse_annotation_id);
+  priv->pulse_annotation_id = (annotation_id != NULL) ? g_strdup(annotation_id) : NULL;
+  if (priv->pulse_annotation_id == NULL) {
+    zathura_page_widget_redraw_canvas(widget);
+    return;
+  }
+
+  priv->pulse_start_us = g_get_monotonic_time();
+  priv->pulse_tick_id  = gtk_widget_add_tick_callback(GTK_WIDGET(widget), cb_annotation_pulse_tick, NULL, NULL);
+  zathura_page_widget_redraw_canvas(widget);
+}
+
 static void cb_zathura_page_widget_button_press_event(GtkGestureClick* gesture, gint n_press, gdouble bx, gdouble by,
                                                       gpointer data) {
   GtkWidget* widget              = GTK_WIDGET(data);
@@ -1037,6 +1356,7 @@ static void cb_zathura_page_widget_button_press_event(GtkGestureClick* gesture, 
 
   if (gbutton == GDK_BUTTON_PRIMARY) {
     zathura_page_widget_clear_selection(page);
+    zathura_page_widget_clear_selection_snapshot(page);
 
     if (n_press == 1) {
       /* clear pages with a selection already */
@@ -1053,8 +1373,10 @@ static void cb_zathura_page_widget_button_press_event(GtkGestureClick* gesture, 
             ZathuraPageWidget* other_page        = ZATHURA_PAGE_WIDGET(other_widget);
             ZathuraPageWidgetPrivate* other_priv = zathura_page_widget_get_instance_private(other_page);
 
-            if (other_priv->selection.draw == true || other_priv->highlighter.draw == true) {
+            if (other_priv->selection.draw == true || other_priv->highlighter.draw == true ||
+                other_priv->selection_snapshot.valid == true) {
               zathura_page_widget_clear_selection(other_page);
+              zathura_page_widget_clear_selection_snapshot(other_page);
             }
           }
         }
@@ -1102,12 +1424,11 @@ static void cb_zathura_page_widget_button_release_event(GtkGestureClick* gesture
   }
 
   if (priv->mouse.selection.x2 == -1 && priv->mouse.selection.y2 == -1) {
-    /* simple single click */
-    /* get links */
+    /* double or triple click */
     if (priv->zathura->global.double_click_follow) {
       evaluate_link_at_mouse_position(page, oldx, oldy);
     }
-  } else if (priv->selection.list != NULL) {
+  } else if (priv->selection.list != NULL && girara_list_size(priv->selection.list) > 0) {
     zathura_rectangle_t tmp = priv->mouse.selection;
 
     tmp.x1 /= scale;
@@ -1117,10 +1438,42 @@ static void cb_zathura_page_widget_button_release_event(GtkGestureClick* gesture
 
     g_autofree char* text = zathura_page_get_text(priv->page, tmp, NULL);
     if (text != NULL && *text != '\0') {
+      zathura_page_widget_set_selection_snapshot(page, priv->selection.list, text);
+      priv->selection.draw = true;
       /* emit text-selected signal */
       g_signal_emit(page, signals[TEXT_SELECTED], 0, text);
     } else if (priv->zathura->global.double_click_follow == false) {
       evaluate_link_at_mouse_position(page, oldx, oldy);
+    }
+  } else if (priv->mouse.selection.x1 != -1) {
+    /* stationary single click */
+    zathura_page_widget_clear_selection_snapshot(page);
+
+    double rx = bx, ry = by;
+    rotate_point(priv->zathura, zathura_page_get_index(priv->page), bx, by, &rx, &ry);
+    const double page_x = rx / (scale > 0.0 ? scale : 1.0);
+    const double page_y = ry / (scale > 0.0 ? scale : 1.0);
+
+    zathura_annotation_t* hit =
+        zathura_annotations_hit_test(priv->zathura, zathura_page_get_index(priv->page), page_x, page_y);
+    if (hit != NULL) {
+      zathura_annotations_set_active(priv->zathura, hit->id);
+      if (zathura_annotation_has_comment(hit) && priv->zathura->ui.annotation_panel != NULL) {
+        gtk_widget_set_visible(priv->zathura->ui.annotation_panel, TRUE);
+        zathura_annotation_panel_focus_annotation(priv->zathura->ui.annotation_panel, hit->id);
+        zathura_annotations_queue_draw_all(priv->zathura);
+      } else if (priv->zathura->ui.annotation_panel != NULL &&
+                 gtk_widget_get_visible(priv->zathura->ui.annotation_panel)) {
+        zathura_annotation_panel_refresh(priv->zathura->ui.annotation_panel);
+      }
+    } else {
+      zathura_annotations_set_active(priv->zathura, NULL);
+      if (priv->zathura->ui.annotation_panel != NULL && gtk_widget_get_visible(priv->zathura->ui.annotation_panel)) {
+        zathura_annotation_panel_refresh(priv->zathura->ui.annotation_panel);
+      }
+      if (priv->zathura->global.double_click_follow == false) {
+        evaluate_link_at_mouse_position(page, oldx, oldy);
+      }
     }
   }
 
@@ -1194,6 +1547,23 @@ static void cb_zathura_page_widget_motion_notify(GtkEventControllerMotion* contr
       }
     }
   } else {
+    double rx = ex, ry = ey;
+    rotate_point(priv->zathura, zathura_page_get_index(priv->page), ex, ey, &rx, &ry);
+    const double page_x = rx / (scale > 0.0 ? scale : 1.0);
+    const double page_y = ry / (scale > 0.0 ? scale : 1.0);
+
+    zathura_annotation_t* hit =
+        zathura_annotations_hit_test(priv->zathura, zathura_page_get_index(priv->page), page_x, page_y);
+    zathura_page_widget_set_hovered_annotation_id(page, hit != NULL ? hit->id : NULL);
+
+    const bool panel_visible =
+        (priv->zathura->ui.annotation_panel != NULL && gtk_widget_get_visible(priv->zathura->ui.annotation_panel));
+    if (!panel_visible && hit != NULL && zathura_annotation_has_comment(hit)) {
+      gtk_widget_set_tooltip_text(widget, hit->comment);
+    } else {
+      gtk_widget_set_tooltip_text(widget, NULL);
+    }
+
     if (priv->links.retrieved == false) {
       priv->links.list      = zathura_page_links_get(priv->page, NULL);
       priv->links.retrieved = true;
@@ -1227,10 +1597,15 @@ static void cb_zathura_page_widget_leave_notify(GtkEventControllerMotion* UNUSED
   ZathuraPageWidget* page        = ZATHURA_PAGE_WIDGET(data);
   ZathuraPageWidgetPrivate* priv = zathura_page_widget_get_instance_private(page);
 
-  bool keep_selection = false;
-  girara_setting_get(priv->zathura->ui.session, "selection-keep-highlight", &keep_selection);
+  zathura_page_widget_set_hovered_annotation_id(page, NULL);
+  gtk_widget_set_tooltip_text(GTK_WIDGET(page), NULL);
 
-  if (keep_selection == false) {
+  bool keep_selection = false;
+  if (priv->zathura != NULL && priv->zathura->ui.session != NULL) {
+    girara_setting_get(priv->zathura->ui.session, "selection-keep-highlight", &keep_selection);
+  }
+
+  if (keep_selection == false && priv->selection_snapshot.valid == false) {
     zathura_page_widget_clear_selection(page);
   }
 
@@ -1240,13 +1615,125 @@ static void cb_zathura_page_widget_leave_notify(GtkEventControllerMotion* UNUSED
   }
 }
 
-/* show context menu for the image under the click position */
+static bool rectangles_overlap(zathura_rectangle_t a, zathura_rectangle_t b) {
+  return (a.x1 <= b.x2 && a.x2 >= b.x1 && a.y1 <= b.y2 && a.y2 >= b.y1);
+}
+
+static bool page_has_overlapping_annotation(ZathuraPageWidgetPrivate* priv, zathura_rectangle_t bounds) {
+  if (priv == NULL || priv->zathura == NULL || priv->page == NULL) {
+    return false;
+  }
+  GPtrArray* page_anns = zathura_annotations_get_for_page(priv->zathura, zathura_page_get_index(priv->page));
+  if (page_anns == NULL) {
+    return false;
+  }
+  for (guint i = 0; i < page_anns->len; ++i) {
+    zathura_annotation_t* ann = g_ptr_array_index(page_anns, i);
+    if (ann != NULL && rectangles_overlap(ann->bounds, bounds)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/* show context menu for active selection, annotation, or image under the click position */
 static void zathura_page_widget_popup_menu(GtkWidget* widget, double x, double y) {
   g_return_if_fail(widget != NULL);
 
   ZathuraPageWidget* page        = ZATHURA_PAGE_WIDGET(widget);
   ZathuraPageWidgetPrivate* priv = zathura_page_widget_get_instance_private(page);
 
+  double page_x             = x;
+  double page_y             = y;
+  zathura_annotation_t* hit = NULL;
+
+  if (priv->zathura != NULL && priv->page != NULL) {
+    zathura_document_t* document = zathura_page_get_document(priv->page);
+    const double scale           = (document != NULL) ? zathura_document_get_scale(document) : 1.0;
+    double rx = x, ry = y;
+    if (document != NULL) {
+      rotate_point(priv->zathura, zathura_page_get_index(priv->page), x, y, &rx, &ry);
+    }
+    page_x = rx / (scale > 0.0 ? scale : 1.0);
+    page_y = ry / (scale > 0.0 ? scale : 1.0);
+    hit    = zathura_annotations_hit_test(priv->zathura, zathura_page_get_index(priv->page), page_x, page_y);
+  }
+
+  /* If an old selection snapshot exists far from the right-click point and the user right-clicked
+   * directly on an existing annotation, clear the stale snapshot and show the annotation menu. */
+  if (priv->selection_snapshot.valid && hit != NULL) {
+    const zathura_rectangle_t sb = priv->selection_snapshot.bounds;
+    const double pad             = 16.0;
+    const bool click_near_sel =
+        (page_x >= sb.x1 - pad && page_x <= sb.x2 + pad && page_y >= sb.y1 - pad && page_y <= sb.y2 + pad);
+    if (!click_near_sel) {
+      zathura_page_widget_clear_selection_snapshot(page);
+      zathura_page_widget_clear_selection(page);
+    }
+  }
+
+  /* Priority 1: Active text selection snapshot */
+  if (priv->selection_snapshot.valid) {
+    GMenu* model = g_menu_new();
+    g_menu_append(model, _("Highlight in yellow"), "annotation.yellow");
+    g_menu_append(model, _("Highlight in red"), "annotation.red");
+    g_menu_append(model, _("Add comment"), "annotation.comment");
+    if (hit != NULL || page_has_overlapping_annotation(priv, priv->selection_snapshot.bounds)) {
+      if (hit != NULL) {
+        g_free(priv->context_annotation_id);
+        priv->context_annotation_id = g_strdup(hit->id);
+      }
+      g_menu_append(model, _("Remove highlight"), "annotation.remove-selected");
+    }
+
+    if (priv->selection_popover == NULL) {
+      priv->selection_popover = gtk_popover_menu_new_from_model(G_MENU_MODEL(model));
+      gtk_widget_set_parent(priv->selection_popover, widget);
+      gtk_popover_set_has_arrow(GTK_POPOVER(priv->selection_popover), FALSE);
+    } else {
+      gtk_popover_menu_set_menu_model(GTK_POPOVER_MENU(priv->selection_popover), G_MENU_MODEL(model));
+    }
+    g_object_unref(model);
+
+    gtk_popover_set_pointing_to(GTK_POPOVER(priv->selection_popover),
+                                &(GdkRectangle){.x = (int)x, .y = (int)y, .width = 1, .height = 1});
+    gtk_popover_popup(GTK_POPOVER(priv->selection_popover));
+    return;
+  }
+
+  /* Priority 2: Existing annotation under click position */
+  if (hit != NULL) {
+    g_free(priv->context_annotation_id);
+    priv->context_annotation_id = g_strdup(hit->id);
+    zathura_annotations_set_active(priv->zathura, hit->id);
+
+    GMenu* model = g_menu_new();
+    g_menu_append(model, zathura_annotation_has_comment(hit) ? _("Edit comment") : _("Add comment"),
+                  "annotation.edit");
+    g_menu_append(model, _("Change to yellow"), "annotation.recolor-yellow");
+    g_menu_append(model, _("Change to red"), "annotation.recolor-red");
+    if (zathura_annotation_has_comment(hit)) {
+      g_menu_append(model, hit->resolved ? _("Unresolve comment") : _("Resolve comment"),
+                    "annotation.toggle-resolved");
+    }
+    g_menu_append(model, _("Remove highlight"), "annotation.delete");
+
+    if (priv->annotation_popover == NULL) {
+      priv->annotation_popover = gtk_popover_menu_new_from_model(G_MENU_MODEL(model));
+      gtk_widget_set_parent(priv->annotation_popover, widget);
+      gtk_popover_set_has_arrow(GTK_POPOVER(priv->annotation_popover), FALSE);
+    } else {
+      gtk_popover_menu_set_menu_model(GTK_POPOVER_MENU(priv->annotation_popover), G_MENU_MODEL(model));
+    }
+    g_object_unref(model);
+
+    gtk_popover_set_pointing_to(GTK_POPOVER(priv->annotation_popover),
+                                &(GdkRectangle){.x = (int)x, .y = (int)y, .width = 1, .height = 1});
+    gtk_popover_popup(GTK_POPOVER(priv->annotation_popover));
+    return;
+  }
+
+  /* Priority 3: Image under click position */
   if (priv->images.retrieved == false) {
     priv->images.list      = zathura_page_images_get(priv->page, NULL);
     priv->images.retrieved = true;
@@ -1290,6 +1777,215 @@ static void zathura_page_widget_popup_menu(GtkWidget* widget, double x, double y
   gtk_popover_set_pointing_to(GTK_POPOVER(priv->image_popover),
                               &(GdkRectangle){.x = (int)x, .y = (int)y, .width = 1, .height = 1});
   gtk_popover_popup(GTK_POPOVER(priv->image_popover));
+}
+
+static void create_annotation_from_snapshot(ZathuraPageWidget* page, zathura_annotation_color_t color,
+                                            bool start_comment) {
+  g_return_if_fail(ZATHURA_IS_PAGE_WIDGET(page));
+  ZathuraPageWidgetPrivate* priv = zathura_page_widget_get_instance_private(page);
+  if (!priv->selection_snapshot.valid || priv->zathura == NULL || priv->page == NULL) {
+    return;
+  }
+
+  unsigned int page_idx     = zathura_page_get_index(priv->page);
+  zathura_annotation_t* ann = zathura_annotation_new(page_idx, color, priv->selection_snapshot.rectangles,
+                                                     priv->selection_snapshot.text, "");
+  if (ann == NULL) {
+    return;
+  }
+
+  zathura_annotations_add(priv->zathura, ann);
+  zathura_page_widget_clear_selection_snapshot(page);
+  zathura_page_widget_clear_selection(page);
+  zathura_annotations_set_active(priv->zathura, ann->id);
+
+  if (start_comment) {
+    zathura_annotations_start_edit(priv->zathura, ann->id, true);
+    if (priv->zathura->ui.annotation_panel != NULL) {
+      gtk_widget_set_visible(priv->zathura->ui.annotation_panel, TRUE);
+      zathura_annotation_panel_start_edit(priv->zathura->ui.annotation_panel, ann->id, true);
+    }
+  } else {
+    zathura_annotations_mark_dirty(priv->zathura);
+    if (priv->zathura->ui.annotation_panel != NULL && gtk_widget_get_visible(priv->zathura->ui.annotation_panel)) {
+      zathura_annotation_panel_refresh(priv->zathura->ui.annotation_panel);
+    }
+  }
+
+  zathura_page_widget_redraw_canvas(page);
+}
+
+static void cb_menu_annotation_yellow(GSimpleAction* UNUSED(action), GVariant* UNUSED(parameter), gpointer data) {
+  create_annotation_from_snapshot(ZATHURA_PAGE_WIDGET(data), ZATHURA_ANNOTATION_COLOR_YELLOW, false);
+}
+
+static void cb_menu_annotation_red(GSimpleAction* UNUSED(action), GVariant* UNUSED(parameter), gpointer data) {
+  create_annotation_from_snapshot(ZATHURA_PAGE_WIDGET(data), ZATHURA_ANNOTATION_COLOR_RED, false);
+}
+
+static void cb_menu_annotation_comment(GSimpleAction* UNUSED(action), GVariant* UNUSED(parameter), gpointer data) {
+  create_annotation_from_snapshot(ZATHURA_PAGE_WIDGET(data), ZATHURA_ANNOTATION_COLOR_YELLOW, true);
+}
+
+static const char* get_target_annotation_id(ZathuraPageWidgetPrivate* priv) {
+  if (priv->context_annotation_id != NULL) {
+    return priv->context_annotation_id;
+  }
+  if (priv->zathura != NULL) {
+    return priv->zathura->annotations.active_id;
+  }
+  return NULL;
+}
+
+static void cb_menu_annotation_edit(GSimpleAction* UNUSED(action), GVariant* UNUSED(parameter), gpointer data) {
+  ZathuraPageWidget* page        = ZATHURA_PAGE_WIDGET(data);
+  ZathuraPageWidgetPrivate* priv = zathura_page_widget_get_instance_private(page);
+  const char* target_id          = get_target_annotation_id(priv);
+  if (priv->zathura == NULL || target_id == NULL) {
+    return;
+  }
+
+  zathura_annotation_t* ann = zathura_annotations_find(priv->zathura, target_id);
+  if (ann == NULL) {
+    return;
+  }
+
+  zathura_annotations_start_edit(priv->zathura, ann->id, false);
+  if (priv->zathura->ui.annotation_panel != NULL) {
+    gtk_widget_set_visible(priv->zathura->ui.annotation_panel, TRUE);
+    if (ann->resolved) {
+      zathura_annotation_panel_set_show_resolved(priv->zathura->ui.annotation_panel, true);
+    }
+    zathura_annotation_panel_start_edit(priv->zathura->ui.annotation_panel, ann->id, false);
+  }
+  zathura_page_widget_redraw_canvas(page);
+}
+
+static void recolor_context_annotation(ZathuraPageWidget* page, zathura_annotation_color_t color) {
+  ZathuraPageWidgetPrivate* priv = zathura_page_widget_get_instance_private(page);
+  const char* target_id          = get_target_annotation_id(priv);
+  if (priv->zathura == NULL || target_id == NULL) {
+    return;
+  }
+
+  zathura_annotation_t* ann = zathura_annotations_find(priv->zathura, target_id);
+  if (ann == NULL) {
+    return;
+  }
+
+  ann->color            = color;
+  ann->baked_in_surface = false;
+  ann->updated_at       = g_get_real_time();
+  zathura_annotations_mark_dirty(priv->zathura);
+
+  if (priv->zathura->ui.annotation_panel != NULL && gtk_widget_get_visible(priv->zathura->ui.annotation_panel)) {
+    zathura_annotation_panel_refresh(priv->zathura->ui.annotation_panel);
+  }
+  zathura_page_widget_redraw_canvas(page);
+}
+
+static void cb_menu_annotation_recolor_yellow(GSimpleAction* UNUSED(action), GVariant* UNUSED(parameter),
+                                              gpointer data) {
+  recolor_context_annotation(ZATHURA_PAGE_WIDGET(data), ZATHURA_ANNOTATION_COLOR_YELLOW);
+}
+
+static void cb_menu_annotation_recolor_red(GSimpleAction* UNUSED(action), GVariant* UNUSED(parameter), gpointer data) {
+  recolor_context_annotation(ZATHURA_PAGE_WIDGET(data), ZATHURA_ANNOTATION_COLOR_RED);
+}
+
+static void cb_menu_annotation_toggle_resolved(GSimpleAction* UNUSED(action), GVariant* UNUSED(parameter),
+                                               gpointer data) {
+  ZathuraPageWidget* page        = ZATHURA_PAGE_WIDGET(data);
+  ZathuraPageWidgetPrivate* priv = zathura_page_widget_get_instance_private(page);
+  const char* target_id          = get_target_annotation_id(priv);
+  if (priv->zathura == NULL || target_id == NULL) {
+    return;
+  }
+
+  zathura_annotation_t* ann = zathura_annotations_find(priv->zathura, target_id);
+  if (ann == NULL) {
+    return;
+  }
+
+  ann->resolved   = !ann->resolved;
+  ann->updated_at = g_get_real_time();
+  zathura_annotations_mark_dirty(priv->zathura);
+
+  if (priv->zathura->ui.annotation_panel != NULL && gtk_widget_get_visible(priv->zathura->ui.annotation_panel)) {
+    zathura_annotation_panel_refresh(priv->zathura->ui.annotation_panel);
+  }
+  zathura_page_widget_redraw_canvas(page);
+}
+
+static void cb_menu_annotation_delete(GSimpleAction* UNUSED(action), GVariant* UNUSED(parameter), gpointer data) {
+  ZathuraPageWidget* page        = ZATHURA_PAGE_WIDGET(data);
+  ZathuraPageWidgetPrivate* priv = zathura_page_widget_get_instance_private(page);
+  const char* target_id          = get_target_annotation_id(priv);
+  if (priv->zathura == NULL || target_id == NULL) {
+    return;
+  }
+
+  g_autofree char* id_copy = g_strdup(target_id);
+  g_clear_pointer(&priv->context_annotation_id, g_free);
+  zathura_annotations_remove(priv->zathura, id_copy);
+  zathura_annotations_mark_dirty(priv->zathura);
+
+  if (priv->zathura->ui.annotation_panel != NULL && gtk_widget_get_visible(priv->zathura->ui.annotation_panel)) {
+    zathura_annotation_panel_refresh(priv->zathura->ui.annotation_panel);
+  }
+  zathura_page_widget_redraw_canvas(page);
+}
+
+static void cb_menu_annotation_remove_selected(GSimpleAction* UNUSED(action), GVariant* UNUSED(parameter),
+                                               gpointer data) {
+  ZathuraPageWidget* page        = ZATHURA_PAGE_WIDGET(data);
+  ZathuraPageWidgetPrivate* priv = zathura_page_widget_get_instance_private(page);
+  if (priv->zathura == NULL || priv->page == NULL) {
+    return;
+  }
+
+  bool removed = false;
+  if (priv->selection_snapshot.valid) {
+    const zathura_rectangle_t sb = priv->selection_snapshot.bounds;
+    unsigned int page_idx        = zathura_page_get_index(priv->page);
+    GPtrArray* ids_to_remove     = g_ptr_array_new_with_free_func(g_free);
+
+    if (priv->zathura->annotations.list != NULL) {
+      for (size_t idx = 0; idx != girara_list_size(priv->zathura->annotations.list); ++idx) {
+        zathura_annotation_t* ann = girara_list_nth(priv->zathura->annotations.list, idx);
+        if (ann != NULL && ann->page == page_idx && rectangles_overlap(ann->bounds, sb)) {
+          g_ptr_array_add(ids_to_remove, g_strdup(ann->id));
+        }
+      }
+    }
+
+    for (guint i = 0; i < ids_to_remove->len; ++i) {
+      const char* id = g_ptr_array_index(ids_to_remove, i);
+      if (zathura_annotations_remove(priv->zathura, id)) {
+        removed = true;
+      }
+    }
+    g_ptr_array_free(ids_to_remove, TRUE);
+  }
+
+  if (!removed && priv->context_annotation_id != NULL) {
+    g_autofree char* id_copy = g_strdup(priv->context_annotation_id);
+    if (zathura_annotations_remove(priv->zathura, id_copy)) {
+      removed = true;
+    }
+  }
+
+  g_clear_pointer(&priv->context_annotation_id, g_free);
+  zathura_page_widget_clear_selection_snapshot(page);
+  zathura_page_widget_clear_selection(page);
+
+  if (removed) {
+    zathura_annotations_mark_dirty(priv->zathura);
+    if (priv->zathura->ui.annotation_panel != NULL && gtk_widget_get_visible(priv->zathura->ui.annotation_panel)) {
+      zathura_annotation_panel_refresh(priv->zathura->ui.annotation_panel);
+    }
+  }
+  zathura_page_widget_redraw_canvas(page);
 }
 
 static void cb_menu_image_copy(GSimpleAction* UNUSED(action), GVariant* UNUSED(parameter), gpointer data) {
@@ -1378,6 +2074,10 @@ void zathura_page_widget_update_view_time(ZathuraPageWidget* widget) {
   g_return_if_fail(ZATHURA_IS_PAGE_WIDGET(widget));
   ZathuraPageWidgetPrivate* priv = zathura_page_widget_get_instance_private(widget);
 
+  if (priv->render_request == NULL) {
+    return;
+  }
+
   if (zathura_page_get_visibility(priv->page) == true) {
     zathura_render_request_update_view_time(priv->render_request);
   }
@@ -1396,7 +2096,9 @@ bool zathura_page_widget_have_surface(ZathuraPageWidget* widget) {
 void zathura_page_widget_abort_render_request(ZathuraPageWidget* widget) {
   g_return_if_fail(ZATHURA_IS_PAGE_WIDGET(widget));
   ZathuraPageWidgetPrivate* priv = zathura_page_widget_get_instance_private(widget);
-  zathura_render_request_abort(priv->render_request);
+  if (priv->render_request != NULL) {
+    zathura_render_request_abort(priv->render_request);
+  }
 
   /* Make sure that if we are not cached and invisible, that there is no
    * surface.

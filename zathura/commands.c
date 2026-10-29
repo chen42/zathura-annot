@@ -709,3 +709,8 @@ bool cmd_source(girara_session_t* session, girara_list_t* argument_list) {
 
   return true;
 }
+
+bool cmd_comments(girara_session_t* session, girara_list_t* UNUSED(argument_list)) {
+  g_return_val_if_fail(session != NULL, false);
+  return sc_toggle_annotations(session, NULL, NULL, 0);
+}

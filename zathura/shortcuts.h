@@ -332,6 +332,20 @@ bool sc_toggle_single_page_mode(girara_session_t* session, girara_argument_t* ar
                                 unsigned int t);
 
 /**
+ * Toggle annotation and comment side panel
+ *
+ * @param session The used girara session
+ * @param argument The used argument
+ * @param event Girara event
+ * @param t Number of executions
+ * @return true if no error occurred otherwise false
+ */
+bool sc_toggle_annotations(girara_session_t* session, girara_argument_t* argument, girara_event_t* event,
+                           unsigned int t);
+bool sc_delete_annotation(girara_session_t* session, girara_argument_t* argument, girara_event_t* event,
+                          unsigned int t);
+
+/**
  * Quit zathura
  *
  * @param session The used girara session

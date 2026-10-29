@@ -55,8 +55,9 @@ cairo = dependency('cairo')
 magic = dependency('libmagic')
 sqlite = dependency('sqlite3', version: '>=3.35.0')
 xxhash = dependency('libxxhash')
+poppler_glib = dependency('poppler-glib')
 
-build_dependencies = [libm, girara, glib, gio, gthread, gmodule, gtk4, cairo, magic, json_glib, xxhash]
+build_dependencies = [libm, girara, glib, gio, gthread, gmodule, gtk4, cairo, magic, json_glib, xxhash, poppler_glib]
 
 # defines
 defines = [
@@ -121,6 +122,9 @@ sources = files(
   'girara-gtk/statusbar.c',
   'girara-gtk/utils.c',
   'zathura/adjustment.c',
+  'zathura/annotation-panel.c',
+  'zathura/annotations.c',
+  'zathura/annotations-pdf.c',
   'zathura/bookmarks.c',
   'zathura/callbacks.c',
   'zathura/commands.c',
