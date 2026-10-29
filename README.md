@@ -17,7 +17,7 @@ Added Features in zathura-annot
 
 * **Text Highlighting and Comments**:
   * Highlights without comments are rendered in yellow (configurable via `annotation-highlight-color`), and highlights with comments are rendered in red (configurable via `annotation-comment-color`).
-  * Select text on a PDF page and right-click to open the annotation menu (`Highlight`, `Add comment`, or `Remove highlight` if the selection overlaps an existing highlight).
+  * Selecting text on a PDF page automatically opens the annotation menu (`Highlight`, `Add comment`, or `Remove highlight` if the selection overlaps an existing highlight) upon releasing the mouse button.
   * Right-click an existing highlight to add or edit its comment, mark it resolved or unresolved, or remove the highlight.
 * **Comment Side Panel**:
   * Displays comment cards ordered by page and vertical position, with a top-right `×` delete button, compact bottom action buttons (`Page N`, `Edit`, `Resolve`/`Unresolve`), and a `Show resolved` filter.

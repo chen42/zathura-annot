@@ -100,6 +100,7 @@ static void zathura_page_widget_dispose(GObject* object);
 static void zathura_page_widget_set_property(GObject* object, guint prop_id, const GValue* value, GParamSpec* pspec);
 static void zathura_page_widget_get_property(GObject* object, guint prop_id, GValue* value, GParamSpec* pspec);
 static void evaluate_link_at_mouse_position(ZathuraPageWidget* widget, int oldx, int oldy);
+static void zathura_page_widget_popup_selection_menu(GtkWidget* widget, double x, double y);
 static void zathura_page_widget_popup_menu(GtkWidget* widget, double x, double y);
 static void cb_menu_image_copy(GSimpleAction* action, GVariant* parameter, gpointer data);
 static void cb_menu_image_save(GSimpleAction* action, GVariant* parameter, gpointer data);
@@ -1425,6 +1426,7 @@ static void cb_zathura_page_widget_button_release_event(GtkGestureClick* gesture
       priv->selection.draw = true;
       /* emit text-selected signal */
       g_signal_emit(page, signals[TEXT_SELECTED], 0, text);
+      zathura_page_widget_popup_selection_menu(widget, bx, by);
     } else if (priv->zathura->global.double_click_follow == false) {
       evaluate_link_at_mouse_position(page, oldx, oldy);
     }
@@ -1624,6 +1626,53 @@ static bool page_has_overlapping_annotation(ZathuraPageWidgetPrivate* priv, zath
   return false;
 }
 
+static void zathura_page_widget_popup_selection_menu(GtkWidget* widget, double x, double y) {
+  g_return_if_fail(widget != NULL);
+
+  ZathuraPageWidget* page        = ZATHURA_PAGE_WIDGET(widget);
+  ZathuraPageWidgetPrivate* priv = zathura_page_widget_get_instance_private(page);
+  if (!priv->selection_snapshot.valid) {
+    return;
+  }
+
+  zathura_annotation_t* hit = NULL;
+  if (priv->zathura != NULL && priv->page != NULL) {
+    zathura_document_t* document = zathura_page_get_document(priv->page);
+    const double scale           = (document != NULL) ? zathura_document_get_scale(document) : 1.0;
+    double rx = x, ry = y;
+    if (document != NULL) {
+      rotate_point(priv->zathura, zathura_page_get_index(priv->page), x, y, &rx, &ry);
+    }
+    const double page_x = rx / (scale > 0.0 ? scale : 1.0);
+    const double page_y = ry / (scale > 0.0 ? scale : 1.0);
+    hit                 = zathura_annotations_hit_test(priv->zathura, zathura_page_get_index(priv->page), page_x, page_y);
+  }
+
+  GMenu* model = g_menu_new();
+  g_menu_append(model, _("Highlight"), "annotation.yellow");
+  g_menu_append(model, _("Add comment"), "annotation.comment");
+  if (hit != NULL || page_has_overlapping_annotation(priv, priv->selection_snapshot.bounds)) {
+    if (hit != NULL) {
+      g_free(priv->context_annotation_id);
+      priv->context_annotation_id = g_strdup(hit->id);
+    }
+    g_menu_append(model, _("Remove highlight"), "annotation.remove-selected");
+  }
+
+  if (priv->selection_popover == NULL) {
+    priv->selection_popover = gtk_popover_menu_new_from_model(G_MENU_MODEL(model));
+    gtk_widget_set_parent(priv->selection_popover, widget);
+    gtk_popover_set_has_arrow(GTK_POPOVER(priv->selection_popover), FALSE);
+  } else {
+    gtk_popover_menu_set_menu_model(GTK_POPOVER_MENU(priv->selection_popover), G_MENU_MODEL(model));
+  }
+  g_object_unref(model);
+
+  gtk_popover_set_pointing_to(GTK_POPOVER(priv->selection_popover),
+                              &(GdkRectangle){.x = (int)x, .y = (int)y, .width = 1, .height = 1});
+  gtk_popover_popup(GTK_POPOVER(priv->selection_popover));
+}
+
 /* show context menu for active selection, annotation, or image under the click position */
 static void zathura_page_widget_popup_menu(GtkWidget* widget, double x, double y) {
   g_return_if_fail(widget != NULL);
@@ -1662,29 +1711,7 @@ static void zathura_page_widget_popup_menu(GtkWidget* widget, double x, double y
 
   /* Priority 1: Active text selection snapshot */
   if (priv->selection_snapshot.valid) {
-    GMenu* model = g_menu_new();
-    g_menu_append(model, _("Highlight"), "annotation.yellow");
-    g_menu_append(model, _("Add comment"), "annotation.comment");
-    if (hit != NULL || page_has_overlapping_annotation(priv, priv->selection_snapshot.bounds)) {
-      if (hit != NULL) {
-        g_free(priv->context_annotation_id);
-        priv->context_annotation_id = g_strdup(hit->id);
-      }
-      g_menu_append(model, _("Remove highlight"), "annotation.remove-selected");
-    }
-
-    if (priv->selection_popover == NULL) {
-      priv->selection_popover = gtk_popover_menu_new_from_model(G_MENU_MODEL(model));
-      gtk_widget_set_parent(priv->selection_popover, widget);
-      gtk_popover_set_has_arrow(GTK_POPOVER(priv->selection_popover), FALSE);
-    } else {
-      gtk_popover_menu_set_menu_model(GTK_POPOVER_MENU(priv->selection_popover), G_MENU_MODEL(model));
-    }
-    g_object_unref(model);
-
-    gtk_popover_set_pointing_to(GTK_POPOVER(priv->selection_popover),
-                                &(GdkRectangle){.x = (int)x, .y = (int)y, .width = 1, .height = 1});
-    gtk_popover_popup(GTK_POPOVER(priv->selection_popover));
+    zathura_page_widget_popup_selection_menu(widget, x, y);
     return;
   }
 
