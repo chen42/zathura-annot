@@ -128,33 +128,24 @@ bool zathura_annotations_load_pdf_file(girara_list_t* list, const char* path, co
         girara_list_append(rectangles, rect);
       }
 
-      zathura_annotation_color_t ann_color = ZATHURA_ANNOTATION_COLOR_YELLOW;
-      PopplerColor* pdf_color              = poppler_annot_get_color(annot);
-      if (pdf_color != NULL) {
-        if (pdf_color->red > 0x9999 && pdf_color->green < 0x9999) {
-          ann_color = ZATHURA_ANNOTATION_COLOR_RED;
-        }
-        poppler_color_free(pdf_color);
+      g_autofree char* quote      = extract_quote_from_poppler_page(page, rectangles);
+      g_autofree gchar* contents  = poppler_annot_get_contents(annot);
+      zathura_annotation_t* entry = zathura_annotation_new(
+          (unsigned int)p, ZATHURA_ANNOTATION_COLOR_YELLOW, rectangles, quote, contents != NULL ? contents : "");
+      girara_list_free(rectangles);
+
+      if (entry == NULL) {
+        continue;
       }
 
       bool resolved = false;
       if (POPPLER_IS_ANNOT_MARKUP(annot)) {
         gdouble opacity = poppler_annot_markup_get_opacity(POPPLER_ANNOT_MARKUP(annot));
-        if (ann_color == ZATHURA_ANNOTATION_COLOR_YELLOW) {
+        if (entry->color == ZATHURA_ANNOTATION_COLOR_YELLOW) {
           resolved = (opacity > 0.0 && fabs(opacity - 0.34) < 0.005);
         } else {
           resolved = (opacity > 0.0 && fabs(opacity - 0.29) < 0.005);
         }
-      }
-
-      g_autofree char* quote      = extract_quote_from_poppler_page(page, rectangles);
-      g_autofree gchar* contents  = poppler_annot_get_contents(annot);
-      zathura_annotation_t* entry =
-          zathura_annotation_new((unsigned int)p, ann_color, rectangles, quote, contents != NULL ? contents : "");
-      girara_list_free(rectangles);
-
-      if (entry == NULL) {
-        continue;
       }
 
       g_autofree gchar* nm = poppler_annot_get_name(annot);
@@ -281,7 +272,7 @@ bool zathura_annotations_save_pdf_file(girara_list_t* list, const char* source_p
 
       PopplerColor pdf_color = {0};
       gdouble opacity        = 0.35;
-      if (ann->color == ZATHURA_ANNOTATION_COLOR_RED) {
+      if (zathura_annotation_has_comment(ann)) {
         pdf_color.red   = 0xFF00;
         pdf_color.green = 0x5200;
         pdf_color.blue  = 0x5200;

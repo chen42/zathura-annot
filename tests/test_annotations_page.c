@@ -84,6 +84,7 @@ static void test_page_selection_snapshot_and_create_actions(void) {
 
   zathura_annotation_t* ann2 = girara_list_nth(zathura.annotations.list, 1);
   g_assert_nonnull(ann2);
+  g_assert_cmpint(ann2->color, ==, ZATHURA_ANNOTATION_COLOR_RED);
   g_assert_cmpstr(zathura.annotations.editing_id, ==, ann2->id);
   g_assert_true(zathura.annotations.draft_is_new);
 
@@ -102,60 +103,58 @@ static void test_page_draw_highlight_and_comment_badge_visibility(void) {
 
   girara_list_t* rects = girara_list_new_with_free(g_free);
   append_rect(rects, 20.0, 20.0, 120.0, 40.0);
-  zathura_annotation_t* ann = zathura_annotation_new(0, ZATHURA_ANNOTATION_COLOR_YELLOW, rects, "Quote", "Note");
+  zathura_annotation_t* ann_hl = zathura_annotation_new(0, ZATHURA_ANNOTATION_COLOR_YELLOW, rects, "Quote", "");
   girara_list_free(rects);
-  ann->baked_in_surface = false;
-  zathura_annotations_add(&zathura, ann);
+  ann_hl->baked_in_surface = false;
+  zathura_annotations_add(&zathura, ann_hl);
+
+  girara_list_t* rects2 = girara_list_new_with_free(g_free);
+  append_rect(rects2, 20.0, 60.0, 120.0, 80.0);
+  zathura_annotation_t* ann_cmt = zathura_annotation_new(0, ZATHURA_ANNOTATION_COLOR_RED, rects2, "Quote 2", "Note");
+  girara_list_free(rects2);
+  ann_cmt->baked_in_surface = false;
+  zathura_annotations_add(&zathura, ann_cmt);
 
   cairo_surface_t* surf = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 300, 200);
   cairo_t* cr           = cairo_create(surf);
 
-  /* 1. Comment panel hidden (comment_panel_visible == false), annotation unselected */
-  paint_surface_white(cr, 300, 200);
-  zathura_page_widget_draw_annotations(ZATHURA_PAGE_WIDGET(page_widget), cr, 1.0, false);
-
-  guint8 r_center = 0, g_center = 0, b_center = 0;
-  guint8 r_outside_hidden = 0, g_outside_hidden = 0, b_outside_hidden = 0;
-  get_pixel_rgb(surf, 70, 30, &r_center, &g_center, &b_center);
-  get_pixel_rgb(surf, 124, 20, &r_outside_hidden, &g_outside_hidden, &b_outside_hidden);
-
-  /* Highlight background is visible (warm muted yellow: R > 230, B < 215) */
-  g_assert_cmpuint(r_center, >, 230);
-  g_assert_cmpuint(b_center, <, 215);
-  /* When panel is hidden, outside badge area (x=124, y=20) remains pure white */
-  g_assert_cmpuint(r_outside_hidden, ==, 255);
-  g_assert_cmpuint(g_outside_hidden, ==, 255);
-  g_assert_cmpuint(b_outside_hidden, ==, 255);
-
-  /* 2. Comment panel visible (comment_panel_visible == true): badge drawn outside at [122..127, 18..23] */
+  /* 1. Highlight without comment is yellow, highlight with comment is red, no indicator box outside */
   paint_surface_white(cr, 300, 200);
   zathura_page_widget_draw_annotations(ZATHURA_PAGE_WIDGET(page_widget), cr, 1.0, true);
 
-  guint8 r_inside_corner = 0, g_inside_corner = 0, b_inside_corner = 0;
-  guint8 r_outside_vis = 0, g_outside_vis = 0, b_outside_vis = 0;
-  get_pixel_rgb(surf, 116, 24, &r_inside_corner, &g_inside_corner, &b_inside_corner);
-  get_pixel_rgb(surf, 124, 20, &r_outside_vis, &g_outside_vis, &b_outside_vis);
+  guint8 r_hl = 0, g_hl = 0, b_hl = 0;
+  guint8 r_cmt = 0, g_cmt = 0, b_cmt = 0;
+  guint8 r_outside = 0, g_outside = 0, b_outside = 0;
+  get_pixel_rgb(surf, 70, 30, &r_hl, &g_hl, &b_hl);
+  get_pixel_rgb(surf, 70, 70, &r_cmt, &g_cmt, &b_cmt);
+  get_pixel_rgb(surf, 124, 60, &r_outside, &g_outside, &b_outside);
 
-  /* Inside top-right corner of highlight box is unobstructed by badge (same as center) */
-  g_assert_cmpuint(b_inside_corner, ==, b_center);
-  /* Outside badge area now has the indicator box (much lower blue channel than white) */
-  g_assert_cmpuint(b_outside_vis, <, 100);
+  /* Highlight without comment is yellow (high R, high G, lower B) */
+  g_assert_cmpuint(r_hl, >, 240);
+  g_assert_cmpuint(g_hl, >, 235);
+  g_assert_cmpuint(b_hl, <, 190);
 
-  /* 3. Selecting the annotation makes both highlight fill and indicator box brighter */
-  zathura_annotations_set_active(&zathura, ann->id);
+  /* Highlight with comment is red (high R, lower G, lower B) */
+  g_assert_cmpuint(r_cmt, >, 240);
+  g_assert_cmpuint(g_cmt, <, 210);
+  g_assert_cmpuint(b_cmt, <, 210);
+
+  /* Outside area next to commented highlight remains pure white (no comment indicator box) */
+  g_assert_cmpuint(r_outside, ==, 255);
+  g_assert_cmpuint(g_outside, ==, 255);
+  g_assert_cmpuint(b_outside, ==, 255);
+
+  /* 2. Selecting the highlight makes it brighter */
+  zathura_annotations_set_active(&zathura, ann_hl->id);
   paint_surface_white(cr, 300, 200);
   zathura_page_widget_draw_annotations(ZATHURA_PAGE_WIDGET(page_widget), cr, 1.0, true);
 
   guint8 r_active = 0, g_active = 0, b_active = 0;
-  guint8 r_badge_active = 0, g_badge_active = 0, b_badge_active = 0;
   get_pixel_rgb(surf, 70, 30, &r_active, &g_active, &b_active);
-  get_pixel_rgb(surf, 124, 20, &r_badge_active, &g_badge_active, &b_badge_active);
 
-  g_assert_cmpuint(r_active, >=, r_center);
-  g_assert_cmpuint(g_active, >, g_center);
-  g_assert_cmpuint(b_active, <, b_center);
-  g_assert_cmpuint(r_badge_active, >, r_outside_vis);
-  g_assert_cmpuint(g_badge_active, >, g_outside_vis);
+  g_assert_cmpuint(r_active, >=, r_hl);
+  g_assert_cmpuint(g_active, >, g_hl);
+  g_assert_cmpuint(b_active, <, b_hl);
 
   cairo_destroy(cr);
   cairo_surface_destroy(surf);
@@ -222,7 +221,6 @@ static void test_page_context_annotation_actions(void) {
   zathura_annotations_add(&zathura, ann);
   zathura_annotations_set_active(&zathura, ann->id);
 
-  g_assert_true(gtk_widget_activate_action(page_widget, "annotation.recolor-red", NULL));
   g_assert_cmpint(ann->color, ==, ZATHURA_ANNOTATION_COLOR_RED);
 
   g_assert_true(gtk_widget_activate_action(page_widget, "annotation.toggle-resolved", NULL));

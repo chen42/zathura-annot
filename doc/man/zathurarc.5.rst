@@ -670,6 +670,30 @@ The settings described here can be changed with ``set``.
   * Value type: Integer
   * Default value: 340
 
+*annotation-highlight-color*
+  Defines the fill color for highlights without comments.
+
+  * Value type: String
+  * Default value: rgba(255,237,26,0.40)
+
+*annotation-highlight-active-color*
+  Defines the fill color for active or hovered highlights without comments.
+
+  * Value type: String
+  * Default value: rgba(255,247,5,0.52)
+
+*annotation-comment-color*
+  Defines the fill color for highlights with comments.
+
+  * Value type: String
+  * Default value: rgba(255,77,77,0.36)
+
+*annotation-comment-active-color*
+  Defines the fill color for active or hovered highlights with comments.
+
+  * Value type: String
+  * Default value: rgba(255,56,56,0.48)
+
 *continuous-hist-save*
   Tells zathura whether to save document history at each page change or only when
   closing a document.

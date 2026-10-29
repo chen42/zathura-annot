@@ -103,11 +103,8 @@ static void zathura_page_widget_popup_menu(GtkWidget* widget, double x, double y
 static void cb_menu_image_copy(GSimpleAction* action, GVariant* parameter, gpointer data);
 static void cb_menu_image_save(GSimpleAction* action, GVariant* parameter, gpointer data);
 static void cb_menu_annotation_yellow(GSimpleAction* action, GVariant* parameter, gpointer data);
-static void cb_menu_annotation_red(GSimpleAction* action, GVariant* parameter, gpointer data);
 static void cb_menu_annotation_comment(GSimpleAction* action, GVariant* parameter, gpointer data);
 static void cb_menu_annotation_edit(GSimpleAction* action, GVariant* parameter, gpointer data);
-static void cb_menu_annotation_recolor_yellow(GSimpleAction* action, GVariant* parameter, gpointer data);
-static void cb_menu_annotation_recolor_red(GSimpleAction* action, GVariant* parameter, gpointer data);
 static void cb_menu_annotation_toggle_resolved(GSimpleAction* action, GVariant* parameter, gpointer data);
 static void cb_menu_annotation_delete(GSimpleAction* action, GVariant* parameter, gpointer data);
 static void cb_menu_annotation_remove_selected(GSimpleAction* action, GVariant* parameter, gpointer data);
@@ -287,11 +284,8 @@ static void zathura_page_widget_init(ZathuraPageWidget* widget) {
 
   static const GActionEntry annotation_action_entries[] = {
       {"yellow", cb_menu_annotation_yellow, NULL, NULL, NULL, {0, 0, 0}},
-      {"red", cb_menu_annotation_red, NULL, NULL, NULL, {0, 0, 0}},
       {"comment", cb_menu_annotation_comment, NULL, NULL, NULL, {0, 0, 0}},
       {"edit", cb_menu_annotation_edit, NULL, NULL, NULL, {0, 0, 0}},
-      {"recolor-yellow", cb_menu_annotation_recolor_yellow, NULL, NULL, NULL, {0, 0, 0}},
-      {"recolor-red", cb_menu_annotation_recolor_red, NULL, NULL, NULL, {0, 0, 0}},
       {"toggle-resolved", cb_menu_annotation_toggle_resolved, NULL, NULL, NULL, {0, 0, 0}},
       {"delete", cb_menu_annotation_delete, NULL, NULL, NULL, {0, 0, 0}},
       {"remove-selected", cb_menu_annotation_remove_selected, NULL, NULL, NULL, {0, 0, 0}},
@@ -1151,8 +1145,34 @@ static zathura_rectangle_t scale_annotation_rect(zathura_t* zathura, zathura_pag
   return sc;
 }
 
+static GdkRGBA get_annotation_fill_color(zathura_t* zathura, bool is_comment, bool is_selected) {
+  if (is_comment) {
+    if (is_selected) {
+      if (zathura != NULL && zathura->ui.colors.annotation_comment_active_color.alpha > 0.0f) {
+        return zathura->ui.colors.annotation_comment_active_color;
+      }
+      return (GdkRGBA){1.0f, 0.22f, 0.22f, 0.48f};
+    }
+    if (zathura != NULL && zathura->ui.colors.annotation_comment_color.alpha > 0.0f) {
+      return zathura->ui.colors.annotation_comment_color;
+    }
+    return (GdkRGBA){1.0f, 0.30f, 0.30f, 0.36f};
+  }
+
+  if (is_selected) {
+    if (zathura != NULL && zathura->ui.colors.annotation_highlight_active_color.alpha > 0.0f) {
+      return zathura->ui.colors.annotation_highlight_active_color;
+    }
+    return (GdkRGBA){1.0f, 0.97f, 0.02f, 0.52f};
+  }
+  if (zathura != NULL && zathura->ui.colors.annotation_highlight_color.alpha > 0.0f) {
+    return zathura->ui.colors.annotation_highlight_color;
+  }
+  return (GdkRGBA){1.0f, 0.93f, 0.10f, 0.40f};
+}
+
 void zathura_page_widget_draw_annotations(ZathuraPageWidget* widget, cairo_t* cairo, double scale,
-                                          bool comment_panel_visible) {
+                                          bool UNUSED(comment_panel_visible)) {
   g_return_if_fail(ZATHURA_IS_PAGE_WIDGET(widget));
   g_return_if_fail(cairo != NULL);
 
@@ -1175,7 +1195,9 @@ void zathura_page_widget_draw_annotations(ZathuraPageWidget* widget, cairo_t* ca
       continue;
     }
 
-    const bool is_red      = (ann->color == ZATHURA_ANNOTATION_COLOR_RED);
+    const bool is_comment  = zathura_annotation_has_comment(ann) ||
+                             (priv->zathura->annotations.editing_id != NULL &&
+                              g_strcmp0(ann->id, priv->zathura->annotations.editing_id) == 0);
     const bool is_active   = (g_strcmp0(ann->id, priv->zathura->annotations.active_id) == 0);
     const bool is_hovered  = (g_strcmp0(ann->id, priv->hovered_annotation_id) == 0);
     const bool is_selected = (is_active || is_hovered);
@@ -1184,19 +1206,8 @@ void zathura_page_widget_draw_annotations(ZathuraPageWidget* widget, cairo_t* ca
 
     /* 1. Highlight background fill (unless already baked into surface by poppler_page_render) */
     if (!ann->baked_in_surface) {
-      if (is_red) {
-        if (is_selected) {
-          cairo_set_source_rgba(cairo, 1.0, 0.22, 0.22, 0.48);
-        } else {
-          cairo_set_source_rgba(cairo, 1.0, 0.30, 0.30, 0.36);
-        }
-      } else {
-        if (is_selected) {
-          cairo_set_source_rgba(cairo, 1.0, 0.97, 0.02, 0.52);
-        } else {
-          cairo_set_source_rgba(cairo, 1.0, 0.93, 0.10, 0.40);
-        }
-      }
+      GdkRGBA fill = get_annotation_fill_color(priv->zathura, is_comment, is_selected);
+      cairo_set_source_rgba(cairo, fill.red, fill.green, fill.blue, fill.alpha);
 
       if (ann->rectangles != NULL && girara_list_size(ann->rectangles) > 0) {
         for (size_t r_idx = 0; r_idx != girara_list_size(ann->rectangles); ++r_idx) {
@@ -1218,11 +1229,8 @@ void zathura_page_widget_draw_annotations(ZathuraPageWidget* widget, cairo_t* ca
     /* 2. Active / hovered outline (placed outside the highlight rectangle with brighter color) */
     if (is_selected) {
       cairo_set_line_width(cairo, 1.5);
-      if (is_red) {
-        cairo_set_source_rgba(cairo, 1.0, 0.24, 0.24, 0.95);
-      } else {
-        cairo_set_source_rgba(cairo, 1.0, 0.85, 0.04, 0.95);
-      }
+      GdkRGBA active_col = get_annotation_fill_color(priv->zathura, is_comment, true);
+      cairo_set_source_rgba(cairo, active_col.red, active_col.green, active_col.blue, 0.95);
 
       if (ann->rectangles != NULL && girara_list_size(ann->rectangles) > 0) {
         for (size_t r_idx = 0; r_idx != girara_list_size(ann->rectangles); ++r_idx) {
@@ -1241,38 +1249,7 @@ void zathura_page_widget_draw_annotations(ZathuraPageWidget* widget, cairo_t* ca
       }
     }
 
-    /* 3. Comment indicator box (smaller, placed outside top-right of the highlight box) */
-    if (comment_panel_visible && zathura_annotation_has_comment(ann)) {
-      zathura_rectangle_t first_rect = ann->bounds;
-      if (ann->rectangles != NULL && girara_list_size(ann->rectangles) > 0) {
-        zathura_rectangle_t* r0 = girara_list_nth(ann->rectangles, 0);
-        if (r0 != NULL) {
-          first_rect = *r0;
-        }
-      }
-      zathura_rectangle_t sr = scale_annotation_rect(priv->zathura, priv->page, first_rect, scale);
-      const double badge_sz  = 5.0;
-      const double bx        = sr.x2 + 2.0;
-      const double by        = MAX(0.0, sr.y1 - 2.0);
-
-      if (is_red) {
-        if (is_selected) {
-          cairo_set_source_rgba(cairo, 1.0, 0.22, 0.22, 1.0);
-        } else {
-          cairo_set_source_rgba(cairo, 0.92, 0.28, 0.28, 0.92);
-        }
-      } else {
-        if (is_selected) {
-          cairo_set_source_rgba(cairo, 1.0, 0.88, 0.04, 1.0);
-        } else {
-          cairo_set_source_rgba(cairo, 0.94, 0.76, 0.08, 0.92);
-        }
-      }
-      cairo_rectangle(cairo, bx, by, badge_sz, badge_sz);
-      cairo_fill(cairo);
-    }
-
-    /* 4. Reveal pulse outline */
+    /* 3. Reveal pulse outline */
     if (is_pulsing) {
       double elapsed = (double)(g_get_monotonic_time() - priv->pulse_start_us) / 360000.0;
       if (elapsed < 0.0) {
@@ -1282,11 +1259,8 @@ void zathura_page_widget_draw_annotations(ZathuraPageWidget* widget, cairo_t* ca
         double alpha           = 0.95 * (1.0 - elapsed);
         zathura_rectangle_t sr = scale_annotation_rect(priv->zathura, priv->page, ann->bounds, scale);
         cairo_set_line_width(cairo, 2.0);
-        if (is_red) {
-          cairo_set_source_rgba(cairo, 1.0, 0.32, 0.32, alpha);
-        } else {
-          cairo_set_source_rgba(cairo, 1.0, 0.88, 0.08, alpha);
-        }
+        GdkRGBA active_col = get_annotation_fill_color(priv->zathura, is_comment, true);
+        cairo_set_source_rgba(cairo, active_col.red, active_col.green, active_col.blue, alpha);
         cairo_rectangle(cairo, sr.x1 - 3.5, sr.y1 - 3.5, (sr.x2 - sr.x1) + 7.0, (sr.y2 - sr.y1) + 7.0);
         cairo_stroke(cairo);
       }
@@ -1675,8 +1649,7 @@ static void zathura_page_widget_popup_menu(GtkWidget* widget, double x, double y
   /* Priority 1: Active text selection snapshot */
   if (priv->selection_snapshot.valid) {
     GMenu* model = g_menu_new();
-    g_menu_append(model, _("Highlight in yellow"), "annotation.yellow");
-    g_menu_append(model, _("Highlight in red"), "annotation.red");
+    g_menu_append(model, _("Highlight"), "annotation.yellow");
     g_menu_append(model, _("Add comment"), "annotation.comment");
     if (hit != NULL || page_has_overlapping_annotation(priv, priv->selection_snapshot.bounds)) {
       if (hit != NULL) {
@@ -1710,8 +1683,6 @@ static void zathura_page_widget_popup_menu(GtkWidget* widget, double x, double y
     GMenu* model = g_menu_new();
     g_menu_append(model, zathura_annotation_has_comment(hit) ? _("Edit comment") : _("Add comment"),
                   "annotation.edit");
-    g_menu_append(model, _("Change to yellow"), "annotation.recolor-yellow");
-    g_menu_append(model, _("Change to red"), "annotation.recolor-red");
     if (zathura_annotation_has_comment(hit)) {
       g_menu_append(model, hit->resolved ? _("Unresolve comment") : _("Resolve comment"),
                     "annotation.toggle-resolved");
@@ -1819,12 +1790,8 @@ static void cb_menu_annotation_yellow(GSimpleAction* UNUSED(action), GVariant* U
   create_annotation_from_snapshot(ZATHURA_PAGE_WIDGET(data), ZATHURA_ANNOTATION_COLOR_YELLOW, false);
 }
 
-static void cb_menu_annotation_red(GSimpleAction* UNUSED(action), GVariant* UNUSED(parameter), gpointer data) {
-  create_annotation_from_snapshot(ZATHURA_PAGE_WIDGET(data), ZATHURA_ANNOTATION_COLOR_RED, false);
-}
-
 static void cb_menu_annotation_comment(GSimpleAction* UNUSED(action), GVariant* UNUSED(parameter), gpointer data) {
-  create_annotation_from_snapshot(ZATHURA_PAGE_WIDGET(data), ZATHURA_ANNOTATION_COLOR_YELLOW, true);
+  create_annotation_from_snapshot(ZATHURA_PAGE_WIDGET(data), ZATHURA_ANNOTATION_COLOR_RED, true);
 }
 
 static const char* get_target_annotation_id(ZathuraPageWidgetPrivate* priv) {
@@ -1859,38 +1826,6 @@ static void cb_menu_annotation_edit(GSimpleAction* UNUSED(action), GVariant* UNU
     zathura_annotation_panel_start_edit(priv->zathura->ui.annotation_panel, ann->id, false);
   }
   zathura_page_widget_redraw_canvas(page);
-}
-
-static void recolor_context_annotation(ZathuraPageWidget* page, zathura_annotation_color_t color) {
-  ZathuraPageWidgetPrivate* priv = zathura_page_widget_get_instance_private(page);
-  const char* target_id          = get_target_annotation_id(priv);
-  if (priv->zathura == NULL || target_id == NULL) {
-    return;
-  }
-
-  zathura_annotation_t* ann = zathura_annotations_find(priv->zathura, target_id);
-  if (ann == NULL) {
-    return;
-  }
-
-  ann->color            = color;
-  ann->baked_in_surface = false;
-  ann->updated_at       = g_get_real_time();
-  zathura_annotations_mark_dirty(priv->zathura);
-
-  if (priv->zathura->ui.annotation_panel != NULL && gtk_widget_get_visible(priv->zathura->ui.annotation_panel)) {
-    zathura_annotation_panel_refresh(priv->zathura->ui.annotation_panel);
-  }
-  zathura_page_widget_redraw_canvas(page);
-}
-
-static void cb_menu_annotation_recolor_yellow(GSimpleAction* UNUSED(action), GVariant* UNUSED(parameter),
-                                              gpointer data) {
-  recolor_context_annotation(ZATHURA_PAGE_WIDGET(data), ZATHURA_ANNOTATION_COLOR_YELLOW);
-}
-
-static void cb_menu_annotation_recolor_red(GSimpleAction* UNUSED(action), GVariant* UNUSED(parameter), gpointer data) {
-  recolor_context_annotation(ZATHURA_PAGE_WIDGET(data), ZATHURA_ANNOTATION_COLOR_RED);
 }
 
 static void cb_menu_annotation_toggle_resolved(GSimpleAction* UNUSED(action), GVariant* UNUSED(parameter),

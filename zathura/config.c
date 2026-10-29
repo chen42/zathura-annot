@@ -12,6 +12,7 @@
 #include <girara/log.h>
 #include <glib/gi18n.h>
 
+#include "annotations.h"
 #include "callbacks.h"
 #include "commands.h"
 #include "completion.h"
@@ -89,6 +90,18 @@ static void cb_color_change(girara_session_t* session, const char* name, girara_
     parse_color(&zathura->ui.colors.signature_warning, string_value);
   } else if (g_strcmp0(name, "signature-error-color") == 0) {
     parse_color(&zathura->ui.colors.signature_error, string_value);
+  } else if (g_strcmp0(name, "annotation-highlight-color") == 0) {
+    parse_color(&zathura->ui.colors.annotation_highlight_color, string_value);
+    zathura_annotations_queue_draw_all(zathura);
+  } else if (g_strcmp0(name, "annotation-highlight-active-color") == 0) {
+    parse_color(&zathura->ui.colors.annotation_highlight_active_color, string_value);
+    zathura_annotations_queue_draw_all(zathura);
+  } else if (g_strcmp0(name, "annotation-comment-color") == 0) {
+    parse_color(&zathura->ui.colors.annotation_comment_color, string_value);
+    zathura_annotations_queue_draw_all(zathura);
+  } else if (g_strcmp0(name, "annotation-comment-active-color") == 0) {
+    parse_color(&zathura->ui.colors.annotation_comment_active_color, string_value);
+    zathura_annotations_queue_draw_all(zathura);
   }
 
   zathura_document_widget_render_all(zathura->ui.document_widget);
@@ -637,6 +650,10 @@ void config_load_default(zathura_t* zathura) {
   girara_setting_add(gsession, "annotation-panel-width",     &int_value,   INT,     false, _("Width of the annotation panel in pixels"), cb_annotation_panel_width_changed, NULL);
   bool_value = false;
   girara_setting_add(gsession, "annotation-panel-open",      &bool_value,  BOOLEAN, false, _("Open annotation panel automatically when opening a document"), NULL, NULL);
+  girara_setting_add(gsession, "annotation-highlight-color",        NULL,  STRING,  false, _("Color for highlights without comments"), cb_color_change, NULL);
+  girara_setting_add(gsession, "annotation-highlight-active-color", NULL,  STRING,  false, _("Color for active highlights without comments"), cb_color_change, NULL);
+  girara_setting_add(gsession, "annotation-comment-color",          NULL,  STRING,  false, _("Color for highlights with comments"), cb_color_change, NULL);
+  girara_setting_add(gsession, "annotation-comment-active-color",   NULL,  STRING,  false, _("Color for active highlights with comments"), cb_color_change, NULL);
 
   // clang-format on
   // apply some color settings that need their callbacks to run
@@ -648,6 +665,10 @@ void config_load_default(zathura_t* zathura) {
   girara_setting_set(gsession, "signature-success-color", "rgba(18%,80%,33%,0.9)");
   girara_setting_set(gsession, "signature-warning-color", "rgba(100%,84%,0%,0.9)");
   girara_setting_set(gsession, "signature-error-color", "rgba(92%,11%,14%,0.9)");
+  girara_setting_set(gsession, "annotation-highlight-color", "rgba(255,237,26,0.40)");
+  girara_setting_set(gsession, "annotation-highlight-active-color", "rgba(255,247,5,0.52)");
+  girara_setting_set(gsession, "annotation-comment-color", "rgba(255,77,77,0.36)");
+  girara_setting_set(gsession, "annotation-comment-active-color", "rgba(255,56,56,0.48)");
   // clang-format off
 
   /* Define mode-less shortcuts

@@ -30,12 +30,16 @@ static void test_annotation_lifecycle_and_bounds(void) {
 
   zathura_annotation_t* ann =
       zathura_annotation_new(1, ZATHURA_ANNOTATION_COLOR_YELLOW, rects, "quoted text", "initial comment");
+  zathura_annotation_t* ann_no_comment =
+      zathura_annotation_new(1, ZATHURA_ANNOTATION_COLOR_RED, rects, "plain highlight", "");
   girara_list_free(rects);
 
   g_assert_nonnull(ann);
   g_assert_nonnull(ann->id);
   g_assert_cmpuint(ann->page, ==, 1);
-  g_assert_cmpint(ann->color, ==, ZATHURA_ANNOTATION_COLOR_YELLOW);
+  g_assert_cmpint(ann->color, ==, ZATHURA_ANNOTATION_COLOR_RED);
+  g_assert_cmpint(ann_no_comment->color, ==, ZATHURA_ANNOTATION_COLOR_YELLOW);
+  zathura_annotation_free(ann_no_comment);
   g_assert_cmpstr(ann->quote, ==, "quoted text");
   g_assert_cmpstr(ann->comment, ==, "initial comment");
   g_assert_true(zathura_annotation_has_comment(ann));
@@ -188,6 +192,7 @@ static void test_annotation_draft_edit_commit_and_cancel(void) {
   g_assert_true(zathura_annotations_start_edit(&zathura, id1, true));
   g_assert_cmpstr(zathura.annotations.editing_id, ==, id1);
   g_assert_true(zathura.annotations.draft_is_new);
+  g_assert_cmpint(ann1->color, ==, ZATHURA_ANNOTATION_COLOR_RED);
 
   g_assert_true(zathura_annotations_commit_edit(&zathura, id1, "Saved comment"));
   g_assert_null(zathura.annotations.editing_id);
@@ -195,6 +200,7 @@ static void test_annotation_draft_edit_commit_and_cancel(void) {
   g_assert_false(zathura.annotations.draft_is_new);
   g_assert_nonnull(zathura_annotations_find(&zathura, id1));
   g_assert_cmpstr(ann1->comment, ==, "Saved comment");
+  g_assert_cmpint(ann1->color, ==, ZATHURA_ANNOTATION_COLOR_RED);
 
   /* 2. Existing annotation (draft_is_new == false): cancel_edit preserves annotation and comment */
   g_assert_true(zathura_annotations_start_edit(&zathura, id1, false));

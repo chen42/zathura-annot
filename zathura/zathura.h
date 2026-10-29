@@ -114,6 +114,10 @@ struct zathura_s {
       GdkRGBA signature_success;      /**> Color for highlighing valid signatures */
       GdkRGBA signature_warning;      /**> Color for highlighing  signatures with warnings */
       GdkRGBA signature_error;        /**> Color for highlighing invalid signatures */
+      GdkRGBA annotation_highlight_color;        /**< Color for highlights without comments */
+      GdkRGBA annotation_highlight_active_color; /**< Color for active highlights without comments */
+      GdkRGBA annotation_comment_color;          /**< Color for highlights with comments */
+      GdkRGBA annotation_comment_active_color;   /**< Color for active highlights with comments */
     } colors;
 
     GtkWidget* view;                            /**< Scrolled Window */

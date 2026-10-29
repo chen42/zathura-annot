@@ -177,29 +177,6 @@ static void cb_card_edit_clicked(GtkButton* button, gpointer user_data) {
   zathura_annotation_panel_start_edit(state->root, id, false);
 }
 
-static void cb_card_color_clicked(GtkButton* button, gpointer user_data) {
-  zathura_annotation_panel_state_t* state = user_data;
-  const char* id                          = g_object_get_data(G_OBJECT(button), "zathura-annotation-id");
-  if (state == NULL || state->zathura == NULL || id == NULL) {
-    return;
-  }
-
-  sync_active_editor_draft(state);
-  zathura_annotation_t* ann = zathura_annotations_find(state->zathura, id);
-  if (ann == NULL) {
-    return;
-  }
-
-  zathura_annotations_set_active(state->zathura, ann->id);
-  ann->color            = (ann->color == ZATHURA_ANNOTATION_COLOR_YELLOW) ? ZATHURA_ANNOTATION_COLOR_RED
-                                                                          : ZATHURA_ANNOTATION_COLOR_YELLOW;
-  ann->baked_in_surface = false;
-  ann->updated_at       = g_get_real_time();
-  zathura_annotations_mark_dirty(state->zathura);
-  zathura_annotation_panel_refresh(state->root);
-  zathura_annotations_queue_draw_page(state->zathura, ann->page);
-}
-
 static void cb_card_resolve_clicked(GtkButton* button, gpointer user_data) {
   zathura_annotation_panel_state_t* state = user_data;
   const char* id                          = g_object_get_data(G_OBJECT(button), "zathura-annotation-id");
@@ -298,7 +275,8 @@ static GtkWidget* create_card_widget(zathura_annotation_panel_state_t* state, za
   g_signal_connect(card_click, "pressed", G_CALLBACK(cb_card_clicked), card);
   gtk_widget_add_controller(card, GTK_EVENT_CONTROLLER(card_click));
 
-  /* 1. Quoted snippet */
+  /* 1. Top row: quoted snippet on the left, delete (×) button on the top right */
+  GtkWidget* top_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
   if (ann->quote != NULL && ann->quote[0] != '\0') {
     GtkWidget* quote_label = gtk_label_new(ann->quote);
     gtk_widget_add_css_class(quote_label, "annotation-quote");
@@ -306,8 +284,24 @@ static GtkWidget* create_card_widget(zathura_annotation_panel_state_t* state, za
     gtk_label_set_xalign(GTK_LABEL(quote_label), 0.0f);
     gtk_label_set_lines(GTK_LABEL(quote_label), 3);
     gtk_label_set_ellipsize(GTK_LABEL(quote_label), PANGO_ELLIPSIZE_END);
-    gtk_box_append(GTK_BOX(card), quote_label);
+    gtk_widget_set_hexpand(quote_label, TRUE);
+    gtk_box_append(GTK_BOX(top_row), quote_label);
+  } else {
+    GtkWidget* spacer = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_set_hexpand(spacer, TRUE);
+    gtk_box_append(GTK_BOX(top_row), spacer);
   }
+
+  GtkWidget* delete_btn = gtk_button_new_with_label("×");
+  gtk_widget_add_css_class(delete_btn, "annotation-card-btn");
+  gtk_widget_add_css_class(delete_btn, "annotation-close-btn");
+  gtk_widget_add_css_class(delete_btn, "flat");
+  gtk_widget_set_valign(delete_btn, GTK_ALIGN_START);
+  g_object_set_data_full(G_OBJECT(delete_btn), "zathura-annotation-id", g_strdup(ann->id), g_free);
+  g_signal_connect(delete_btn, "clicked", G_CALLBACK(cb_card_delete_clicked), state);
+  gtk_box_append(GTK_BOX(top_row), delete_btn);
+
+  gtk_box_append(GTK_BOX(card), top_row);
 
   /* 2. Comment body or inline editor */
   const bool is_editing = (g_strcmp0(ann->id, state->zathura->annotations.editing_id) == 0);
@@ -384,27 +378,12 @@ static GtkWidget* create_card_widget(zathura_annotation_panel_state_t* state, za
   g_signal_connect(edit_btn, "clicked", G_CALLBACK(cb_card_edit_clicked), state);
   gtk_box_append(GTK_BOX(bottom_row), edit_btn);
 
-  GtkWidget* color_btn =
-      gtk_button_new_with_label(ann->color == ZATHURA_ANNOTATION_COLOR_YELLOW ? _("Red") : _("Yellow"));
-  gtk_widget_add_css_class(color_btn, "annotation-card-btn");
-  gtk_widget_add_css_class(color_btn, "flat");
-  g_object_set_data_full(G_OBJECT(color_btn), "zathura-annotation-id", g_strdup(ann->id), g_free);
-  g_signal_connect(color_btn, "clicked", G_CALLBACK(cb_card_color_clicked), state);
-  gtk_box_append(GTK_BOX(bottom_row), color_btn);
-
   GtkWidget* resolve_btn = gtk_button_new_with_label(ann->resolved ? _("Unresolve") : _("Resolve"));
   gtk_widget_add_css_class(resolve_btn, "annotation-card-btn");
   gtk_widget_add_css_class(resolve_btn, "flat");
   g_object_set_data_full(G_OBJECT(resolve_btn), "zathura-annotation-id", g_strdup(ann->id), g_free);
   g_signal_connect(resolve_btn, "clicked", G_CALLBACK(cb_card_resolve_clicked), state);
   gtk_box_append(GTK_BOX(bottom_row), resolve_btn);
-
-  GtkWidget* delete_btn = gtk_button_new_with_label(_("Delete"));
-  gtk_widget_add_css_class(delete_btn, "annotation-card-btn");
-  gtk_widget_add_css_class(delete_btn, "flat");
-  g_object_set_data_full(G_OBJECT(delete_btn), "zathura-annotation-id", g_strdup(ann->id), g_free);
-  g_signal_connect(delete_btn, "clicked", G_CALLBACK(cb_card_delete_clicked), state);
-  gtk_box_append(GTK_BOX(bottom_row), delete_btn);
 
   gtk_box_append(GTK_BOX(card), bottom_row);
 

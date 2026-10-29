@@ -82,7 +82,7 @@ static void test_pdf_save_and_reload_roundtrip(void) {
   g_assert_nonnull(loaded1);
 
   g_assert_cmpuint(loaded0->page, ==, 0);
-  g_assert_cmpint(loaded0->color, ==, ZATHURA_ANNOTATION_COLOR_YELLOW);
+  g_assert_cmpint(loaded0->color, ==, ZATHURA_ANNOTATION_COLOR_RED);
   g_assert_cmpuint(girara_list_size(loaded0->rectangles), ==, 2);
   g_assert_cmpstr(loaded0->comment, ==, "Check methods section");
   g_assert_nonnull(loaded0->quote);
@@ -102,7 +102,7 @@ static void test_pdf_save_and_reload_roundtrip(void) {
   g_assert_cmpfloat_with_epsilon(r0_1->y2, 132.0, 1e-3);
 
   g_assert_cmpuint(loaded1->page, ==, 1);
-  g_assert_cmpint(loaded1->color, ==, ZATHURA_ANNOTATION_COLOR_RED);
+  g_assert_cmpint(loaded1->color, ==, ZATHURA_ANNOTATION_COLOR_YELLOW);
   g_assert_cmpuint(girara_list_size(loaded1->rectangles), ==, 1);
   g_assert_cmpstr(loaded1->comment, ==, "");
   g_assert_true(loaded1->baked_in_surface);
@@ -232,7 +232,7 @@ static void test_pdf_external_highlight_import(void) {
   g_assert_cmpuint(girara_list_size(zathura.annotations.list), ==, 1);
 
   zathura_annotation_t* imported = girara_list_nth(zathura.annotations.list, 0);
-  g_assert_cmpint(imported->color, ==, ZATHURA_ANNOTATION_COLOR_YELLOW);
+  g_assert_cmpint(imported->color, ==, ZATHURA_ANNOTATION_COLOR_RED);
   g_assert_cmpstr(imported->comment, ==, "External viewer note");
 
   zathura_annotations_free(&zathura);

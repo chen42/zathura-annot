@@ -84,6 +84,7 @@ zathura_rectangle_t zathura_annotation_get_bounds(girara_list_t* rectangles) {
 
 zathura_annotation_t* zathura_annotation_new(unsigned int page, zathura_annotation_color_t color,
                                              girara_list_t* rectangles, const char* quote, const char* comment) {
+  (void)color;
   zathura_annotation_t* annotation = g_try_malloc0(sizeof(zathura_annotation_t));
   if (annotation == NULL) {
     return NULL;
@@ -91,7 +92,8 @@ zathura_annotation_t* zathura_annotation_new(unsigned int page, zathura_annotati
 
   annotation->id               = g_uuid_string_random();
   annotation->page             = page;
-  annotation->color            = color;
+  annotation->color            = string_is_blank(comment) ? ZATHURA_ANNOTATION_COLOR_YELLOW
+                                                          : ZATHURA_ANNOTATION_COLOR_RED;
   annotation->rectangles       = zathura_annotation_rectangles_copy(rectangles);
   annotation->bounds           = zathura_annotation_get_bounds(annotation->rectangles);
   annotation->quote            = g_strdup(quote != NULL ? quote : "");
@@ -397,11 +399,6 @@ static bool rectangle_contains_point(zathura_rectangle_t rect, double x, double 
   return (x >= norm.x1 && x <= norm.x2 && y >= norm.y1 && y <= norm.y2);
 }
 
-static bool badge_contains_point(zathura_rectangle_t rect, double x, double y) {
-  zathura_rectangle_t norm = normalize_rectangle(rect);
-  return (x >= norm.x2 && x <= norm.x2 + 8.0 && y >= norm.y1 - 4.0 && y <= norm.y1 + 8.0);
-}
-
 zathura_annotation_t* zathura_annotations_hit_test(zathura_t* zathura, unsigned int page, double page_x, double page_y) {
   GPtrArray* page_anns = zathura_annotations_get_for_page(zathura, page);
   if (page_anns == NULL || page_anns->len == 0) {
@@ -418,9 +415,7 @@ zathura_annotation_t* zathura_annotations_hit_test(zathura_t* zathura, unsigned 
       bool matched = false;
       for (size_t r_idx = 0; r_idx != girara_list_size(ann->rectangles); ++r_idx) {
         zathura_rectangle_t* rect = girara_list_nth(ann->rectangles, r_idx);
-        if (rect != NULL && (rectangle_contains_point(*rect, page_x, page_y) ||
-                             (r_idx == 0 && zathura_annotation_has_comment(ann) &&
-                              badge_contains_point(*rect, page_x, page_y)))) {
+        if (rect != NULL && rectangle_contains_point(*rect, page_x, page_y)) {
           matched = true;
           break;
         }
@@ -428,8 +423,7 @@ zathura_annotation_t* zathura_annotations_hit_test(zathura_t* zathura, unsigned 
       if (matched) {
         return ann;
       }
-    } else if (rectangle_contains_point(ann->bounds, page_x, page_y) ||
-               (zathura_annotation_has_comment(ann) && badge_contains_point(ann->bounds, page_x, page_y))) {
+    } else if (rectangle_contains_point(ann->bounds, page_x, page_y)) {
       return ann;
     }
   }
@@ -446,6 +440,9 @@ bool zathura_annotations_start_edit(zathura_t* zathura, const char* id, bool dra
   if (ann == NULL) {
     return false;
   }
+
+  ann->color            = ZATHURA_ANNOTATION_COLOR_RED;
+  ann->baked_in_surface = false;
 
   g_autofree char* id_copy = g_strdup(id);
   g_free(zathura->annotations.editing_id);
@@ -483,12 +480,16 @@ bool zathura_annotations_commit_edit(zathura_t* zathura, const char* id, const c
       return false;
     }
     g_free(ann->comment);
-    ann->comment    = g_strdup("");
-    ann->updated_at = g_get_real_time();
+    ann->comment          = g_strdup("");
+    ann->color            = ZATHURA_ANNOTATION_COLOR_YELLOW;
+    ann->baked_in_surface = false;
+    ann->updated_at       = g_get_real_time();
   } else {
     g_free(ann->comment);
-    ann->comment    = g_strdup(text);
-    ann->updated_at = g_get_real_time();
+    ann->comment          = g_strdup(text);
+    ann->color            = ZATHURA_ANNOTATION_COLOR_RED;
+    ann->baked_in_surface = false;
+    ann->updated_at       = g_get_real_time();
   }
 
   if (is_editing_target) {
@@ -514,6 +515,11 @@ void zathura_annotations_cancel_edit(zathura_t* zathura) {
 
   if (draft_is_new) {
     zathura_annotations_remove(zathura, editing_id);
+  } else {
+    zathura_annotation_t* ann = zathura_annotations_find(zathura, editing_id);
+    if (ann != NULL) {
+      ann->color = zathura_annotation_has_comment(ann) ? ZATHURA_ANNOTATION_COLOR_RED : ZATHURA_ANNOTATION_COLOR_YELLOW;
+    }
   }
 }
 
