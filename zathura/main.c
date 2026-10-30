@@ -13,6 +13,7 @@
 #include <string.h>
 #include <sys/wait.h>
 
+#include "annotation-panel.h"
 #include "zathura.h"
 #include "plugin.h"
 #include "utils.h"
@@ -253,21 +254,36 @@ GIRARA_VISIBLE int main(int argc, char* argv[]) {
 #endif
 
   /* parse command line arguments */
-  g_autofree gchar* config_dir     = NULL;
-  g_autofree gchar* data_dir       = NULL;
-  g_autofree gchar* cache_dir      = NULL;
-  g_autofree gchar* plugin_path    = NULL;
-  g_autofree gchar* loglevel       = NULL;
-  g_autofree gchar* password       = NULL;
-  g_autofree gchar* synctex_editor = NULL;
-  g_autofree gchar* synctex_fwd    = NULL;
-  g_autofree gchar* mode           = NULL;
-  g_autofree gchar* bookmark_name  = NULL;
-  g_autofree gchar* search_string  = NULL;
-  gboolean forkback                = false;
-  gboolean print_version           = false;
-  gint page_number                 = ZATHURA_PAGE_NUMBER_UNSPECIFIED;
-  gint synctex_pid                 = -1;
+  g_autofree gchar* config_dir            = NULL;
+  g_autofree gchar* data_dir              = NULL;
+  g_autofree gchar* cache_dir             = NULL;
+  g_autofree gchar* plugin_path           = NULL;
+  g_autofree gchar* loglevel              = NULL;
+  g_autofree gchar* password              = NULL;
+  g_autofree gchar* synctex_editor        = NULL;
+  g_autofree gchar* synctex_fwd           = NULL;
+  g_autofree gchar* mode                  = NULL;
+  g_autofree gchar* bookmark_name         = NULL;
+  g_autofree gchar* search_string         = NULL;
+  g_autofree gchar* export_output_path    = NULL;
+  gboolean forkback                       = false;
+  gboolean print_version                  = false;
+  gboolean cli_export_requested           = false;
+  zathura_annotation_export_mode_t cli_export_mode = ZATHURA_ANNOTATION_EXPORT_HIGHLIGHTS_ALL_COMMENTS;
+  gint page_number                        = ZATHURA_PAGE_NUMBER_UNSPECIFIED;
+  gint synctex_pid                        = -1;
+
+  for (int i = 1; i < argc; ++i) {
+    if (argv[i] != NULL && g_str_has_prefix(argv[i], "--export-annotations=")) {
+      const char* eq_val = argv[i] + strlen("--export-annotations=");
+      if (!zathura_annotation_export_mode_parse(eq_val, &cli_export_mode)) {
+        girara_error("Invalid export flag '%s'. Use +highlights_all_comments, +all_comments, +visible_comments, or +highlights.",
+                     eq_val);
+        return -1;
+      }
+      argv[i] = (char*)"--export-annotations";
+    }
+  }
 
   const GOptionEntry entries[] = {
       {"config-dir", 'c', 0, G_OPTION_ARG_FILENAME, &config_dir, _("Path to the config directory"), "path"},
@@ -289,6 +305,11 @@ GIRARA_VISIBLE int main(int argc, char* argv[]) {
       {"bookmark", 'b', 0, G_OPTION_ARG_STRING, &bookmark_name, _("Bookmark to go to"), "bookmark"},
       {"find", 'f', 0, G_OPTION_ARG_STRING, &search_string, _("Search for the given phrase and display results"),
        "string"},
+      {"export-annotations", 'e', 0, G_OPTION_ARG_NONE, &cli_export_requested,
+       _("Export PDF annotations (+highlights_all_comments [default], +all_comments, +visible_comments, +highlights)"),
+       NULL},
+      {"export-output", 'o', 0, G_OPTION_ARG_FILENAME, &export_output_path,
+       _("Output file path for --export-annotations (default: <pdf>-<flag>.tsv)"), "path"},
       {NULL, '\0', 0, 0, NULL, NULL, NULL},
   };
 
@@ -347,6 +368,57 @@ GIRARA_VISIBLE int main(int argc, char* argv[]) {
    * So if there is one -- in argv, we need to ignore it. */
   const bool has_double_dash = argc > 1 && !g_strcmp0(argv[1], "--");
   const int file_idx_base    = has_double_dash ? 2 : 1;
+
+  if (cli_export_requested) {
+#ifdef WITH_SANDBOX
+    girara_error("--export-annotations is not supported in zathura-sandbox.");
+    return -1;
+#else
+    g_autoptr(GPtrArray) export_files = g_ptr_array_new();
+    for (int idx = file_idx_base; idx < argc; ++idx) {
+      const char* arg = argv[idx];
+      if (arg == NULL) {
+        continue;
+      }
+      zathura_annotation_export_mode_t parsed_mode = ZATHURA_ANNOTATION_EXPORT_HIGHLIGHTS_ALL_COMMENTS;
+      if ((arg[0] == '+' || !g_file_test(arg, G_FILE_TEST_EXISTS)) &&
+          zathura_annotation_export_mode_parse(arg, &parsed_mode)) {
+        cli_export_mode = parsed_mode;
+        continue;
+      }
+      if (arg[0] == '+' && !g_file_test(arg, G_FILE_TEST_EXISTS)) {
+        girara_error("Invalid export flag '%s'. Use +highlights_all_comments, +all_comments, +visible_comments, or +highlights.",
+                     arg);
+        return -1;
+      }
+      g_ptr_array_add(export_files, (gpointer)arg);
+    }
+
+    if (export_files->len == 0) {
+      girara_error("No PDF file specified for --export-annotations.");
+      return -1;
+    }
+
+    int exit_code = 0;
+    for (guint i = 0; i < export_files->len; ++i) {
+      const char* pdf_file          = g_ptr_array_index(export_files, i);
+      g_autofree char* written_path = NULL;
+      unsigned int exported_count   = 0;
+      g_autoptr(GError) export_err  = NULL;
+      if (!zathura_annotation_export_pdf_file(pdf_file, password, cli_export_mode, export_output_path, &written_path,
+                                              &exported_count, &export_err)) {
+        girara_error("Failed to export annotations from '%s': %s", pdf_file,
+                     export_err != NULL ? export_err->message : "unknown error");
+        exit_code = -1;
+        break;
+      }
+      fprintf(stdout, "Exported %u entry(s) (+%s) to %s\n", exported_count,
+              zathura_annotation_export_mode_to_flag(cli_export_mode), written_path);
+    }
+
+    return exit_code;
+#endif
+  }
 
   int file_idx = argc > file_idx_base ? file_idx_base : 0;
   /* If more than one file, fork an instance for each. */

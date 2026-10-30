@@ -761,8 +761,31 @@ bool cmd_comments(girara_session_t* session, girara_list_t* argument_list) {
       return true;
     }
     if (g_strcmp0(arg, "export") == 0) {
+      zathura_annotation_export_mode_t mode = ZATHURA_ANNOTATION_EXPORT_HIGHLIGHTS_ALL_COMMENTS;
+      const char* target_path               = NULL;
+      const size_t n_args                   = girara_list_size(argument_list);
+
+      if (n_args >= 2) {
+        const char* arg1 = girara_list_nth(argument_list, 1);
+        if (zathura_annotation_export_mode_parse(arg1, &mode)) {
+          if (n_args >= 3) {
+            target_path = girara_list_nth(argument_list, 2);
+          }
+        } else if (arg1 != NULL && arg1[0] == '+') {
+          girara_notify(session, GIRARA_ERROR,
+                        _("Unknown export flag '%s'. Use +highlights_all_comments, +all_comments, +visible_comments, or +highlights."),
+                        arg1);
+          return false;
+        } else {
+          target_path = arg1;
+        }
+      }
+      return zathura_annotation_panel_export_with_mode(zathura->ui.annotation_panel, mode, target_path);
+    }
+    zathura_annotation_export_mode_t direct_mode = ZATHURA_ANNOTATION_EXPORT_HIGHLIGHTS_ALL_COMMENTS;
+    if (arg != NULL && arg[0] == '+' && zathura_annotation_export_mode_parse(arg, &direct_mode)) {
       const char* target_path = girara_list_size(argument_list) > 1 ? girara_list_nth(argument_list, 1) : NULL;
-      return zathura_annotation_panel_export(zathura->ui.annotation_panel, target_path);
+      return zathura_annotation_panel_export_with_mode(zathura->ui.annotation_panel, direct_mode, target_path);
     }
   }
 

@@ -73,6 +73,11 @@ static void set_plugin_dir(zathura_plugin_manager_t* plugin_manager, const char*
 static void set_default_dirs(zathura_plugin_manager_t* plugin_manager) {
 #ifdef ZATHURA_PLUGINDIR
   set_plugin_dir(plugin_manager, ZATHURA_PLUGINDIR);
+  if (g_strcmp0(ZATHURA_PLUGINDIR, "/usr/lib/zathura") != 0) {
+    set_plugin_dir(plugin_manager, "/usr/lib/zathura");
+  }
+#else
+  set_plugin_dir(plugin_manager, "/usr/lib/zathura");
 #endif
 
   const char* env_paths = g_getenv("ZATHURA_PLUGINS_PATH");

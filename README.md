@@ -21,15 +21,24 @@ Added Features in zathura-annot
   * Right-click an existing highlight to add or edit its comment, or remove the highlight.
 * **Comment Side Panel**:
   * Displays comment cards ordered by page and vertical position, with a per-card collapse/expand toggle (`▾` / `▸`), a top-right `×` delete button, compact bottom action buttons (`Page N`, `Edit`), and a global `Roll up` / `Expand all` button in the header.
+  * Rolling up comments collapses cards to show only the first line of each comment; individual comments can be expanded or collapsed one by one via the `▾` / `▸` button or by double-clicking a comment card.
   * Includes a live search/filter bar (`Filter comments...` with `Clear` and `Export` buttons) that filters comments case-insensitively by word or phrase as you type.
-  * Clicking `Export` (or running `:comments export [path]`) exports all currently shown comments (respecting the active filter) as a single-line-per-comment TSV table (`page`, `quote`, `comment`) to `<pdf-basename>-comments.tsv` (or a custom `.tsv`/`.csv` path) and copies the table to the system clipboard.
-  * Rolling up comments collapses cards to show only the first line of each comment; individual comments can still be expanded or collapsed one by one (via the `▾` / `▸` button or by double-clicking a comment card).
   * Rolling the mouse wheel while hovering over the comment panel scrolls the comment list without scrolling the PDF page.
-  * Clicking a comment card selects the annotation; clicking a highlight selects and focuses its card in the panel.
+  * Clicking a comment card selects the annotation (`Page N` jumps to the highlight on the page); clicking a highlight on the PDF page selects its comment card and scrolls the comment panel so the card aligns with the vertical level of the clicked highlighted text.
   * Hiding the comment panel keeps page highlights visible.
   * A bottom horizontal scrollbar (`guioptions` default `"sh"`) and horizontal scrolling (`h` / `l` or `Shift` + mouse wheel) allow moving the PDF page left or right on wide monitors so the comment panel does not cover page text.
+* **Exporting Highlights and Comments**:
+  * Exports entries as a single-line-per-entry TSV table (`page\tquote\tcomment`, or CSV `page,quote,comment` when the output path ends in `.csv`), replacing internal newlines and tabs with spaces.
+  * Supports four export flags, and the default output filename includes the active flag (`<pdf-basename>-<flag>.tsv`):
+    * `+highlights_all_comments` (default): Exports all highlights and all comments to `<pdf-basename>-highlights_all_comments.tsv`.
+    * `+all_comments`: Exports all comments (ignoring any active panel search filter) to `<pdf-basename>-all_comments.tsv`.
+    * `+visible_comments`: Exports only comments currently visible in the comment panel (respecting the active search filter) to `<pdf-basename>-visible_comments.tsv`.
+    * `+highlights`: Exports only highlights without comments to `<pdf-basename>-highlights.tsv`.
+  * **In-app export**: Run `:comments export [+flag] [path]` (or `:comment export [+flag] [path]`) or click `Export` in the comment panel (uses `+visible_comments` when a filter is active and `+highlights_all_comments` otherwise) to write the file and copy the table to the system clipboard.
+  * **Command-line export**: Run `zathura --export-annotations [+flag] [-o path] file.pdf` (or `zathura -e [+flag] [-o path] file.pdf`) to export directly from the command line without opening a window.
 * **Keyboard Shortcuts and Commands**:
-  * `Ctrl+Alt+c`: Toggle the comment side panel (also available via `:comments [open|close|toggle|rollup|expand|filter <phrase>|clear-filter|export [path]]`).
+  * `Ctrl+Alt+c`: Toggle the comment side panel.
+  * `:comments` / `:comment`: `[open|close|toggle|rollup|expand|filter <phrase>|clear-filter|export [+highlights_all_comments|+all_comments|+visible_comments|+highlights] [path]]`.
   * `Delete` / `BackSpace`: Remove the currently selected highlight or annotation.
   * `Ctrl+Enter` / `Esc` (inside the inline comment editor): Save or cancel the comment edit.
 * **Configuration (`zathurarc`)**:
@@ -86,13 +95,20 @@ document viewer.
 Installation
 ------------
 
-To build and install `zathura-annot` using meson's ninja backend:
+Ensure that the PDF document plugin (`zathura-pdf-poppler`) is installed on the system (for example, `sudo pacman -S --needed zathura-pdf-poppler` on Arch Linux).
 
-    meson setup build
+To build and install `zathura-annot` (wiping any existing `build/` directory if synced across machines so cached compiler paths such as `sccache` are not reused, and using `--prefix=/usr` so `zathura` uses `/usr/lib/zathura` for plugins):
+
+    rm -rf build
+    meson setup --prefix=/usr build
     ninja -C build
-    ninja -C build install
+    sudo ninja -C build install
 
-To run the compiled binary directly from `build/` using system-installed document plugins:
+If a previous build was installed without `--prefix=/usr`, remove the `/usr/local` binary so it does not shadow `/usr/bin/zathura`:
+
+    sudo rm -f /usr/local/bin/zathura /usr/local/bin/zathura-sandbox
+
+To run the compiled binary directly from `build/` without installing:
 
     ZATHURA_PLUGINS_PATH=/usr/lib/zathura ./build/zathura /path/to/file.pdf
 

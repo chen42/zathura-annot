@@ -10,6 +10,7 @@
 #include <math.h>
 #include <string.h>
 
+#include "annotations-pdf.h"
 #include "annotations.h"
 #include "document.h"
 #include "utils.h"
@@ -372,7 +373,10 @@ static void cb_export_clicked(GtkButton* UNUSED(button), gpointer user_data) {
   if (state == NULL || state->root == NULL) {
     return;
   }
-  zathura_annotation_panel_export(state->root, NULL);
+  const bool has_filter                       = (state->filter_text != NULL && state->filter_text[0] != '\0');
+  const zathura_annotation_export_mode_t mode = has_filter ? ZATHURA_ANNOTATION_EXPORT_VISIBLE_COMMENTS
+                                                           : ZATHURA_ANNOTATION_EXPORT_HIGHLIGHTS_ALL_COMMENTS;
+  zathura_annotation_panel_export_with_mode(state->root, mode, NULL);
 }
 
 static gboolean cb_filter_key_pressed(GtkEventControllerKey* UNUSED(controller), guint keyval, guint UNUSED(keycode),
@@ -736,7 +740,10 @@ void zathura_annotation_panel_refresh(GtkWidget* panel) {
     gtk_widget_set_sensitive(state->filter_clear_btn, has_filter);
   }
   if (state->export_btn != NULL) {
-    gtk_widget_set_sensitive(state->export_btn, state->card_count > 0);
+    const size_t total_annotations = (state->zathura != NULL && state->zathura->annotations.list != NULL)
+                                         ? girara_list_size(state->zathura->annotations.list)
+                                         : 0;
+    gtk_widget_set_sensitive(state->export_btn, state->card_count > 0 || (!has_filter && total_annotations > 0));
   }
 
   if (state->card_count == 0) {
@@ -1236,30 +1243,94 @@ static void append_csv_field(GString* out, const char* field) {
   g_string_append_c(out, '"');
 }
 
-char* zathura_annotation_panel_format_export(GtkWidget* panel, bool csv_format, unsigned int* exported_count) {
+const char* zathura_annotation_export_mode_to_flag(zathura_annotation_export_mode_t mode) {
+  switch (mode) {
+  case ZATHURA_ANNOTATION_EXPORT_ALL_COMMENTS:
+    return "all_comments";
+  case ZATHURA_ANNOTATION_EXPORT_VISIBLE_COMMENTS:
+    return "visible_comments";
+  case ZATHURA_ANNOTATION_EXPORT_HIGHLIGHTS:
+    return "highlights";
+  case ZATHURA_ANNOTATION_EXPORT_HIGHLIGHTS_ALL_COMMENTS:
+  default:
+    return "highlights_all_comments";
+  }
+}
+
+bool zathura_annotation_export_mode_parse(const char* arg, zathura_annotation_export_mode_t* out_mode) {
+  if (arg == NULL || arg[0] == '\0') {
+    return false;
+  }
+
+  const char* p = arg;
+  while (*p == '+' || *p == '-') {
+    ++p;
+  }
+  if (*p == '\0') {
+    return false;
+  }
+
+  g_autofree char* normalized = g_ascii_strdown(p, -1);
+  for (char* c = normalized; *c != '\0'; ++c) {
+    if (*c == '-') {
+      *c = '_';
+    }
+  }
+
+  zathura_annotation_export_mode_t parsed = ZATHURA_ANNOTATION_EXPORT_HIGHLIGHTS_ALL_COMMENTS;
+  if (g_strcmp0(normalized, "highlights_all_comments") == 0 || g_strcmp0(normalized, "all") == 0 ||
+      g_strcmp0(normalized, "highlights_comments") == 0) {
+    parsed = ZATHURA_ANNOTATION_EXPORT_HIGHLIGHTS_ALL_COMMENTS;
+  } else if (g_strcmp0(normalized, "all_comments") == 0 || g_strcmp0(normalized, "comments") == 0) {
+    parsed = ZATHURA_ANNOTATION_EXPORT_ALL_COMMENTS;
+  } else if (g_strcmp0(normalized, "visible_comments") == 0 || g_strcmp0(normalized, "visibile_comments") == 0 ||
+             g_strcmp0(normalized, "filtered_comments") == 0 || g_strcmp0(normalized, "visible") == 0) {
+    parsed = ZATHURA_ANNOTATION_EXPORT_VISIBLE_COMMENTS;
+  } else if (g_strcmp0(normalized, "highlights") == 0 || g_strcmp0(normalized, "highlights_only") == 0) {
+    parsed = ZATHURA_ANNOTATION_EXPORT_HIGHLIGHTS;
+  } else {
+    return false;
+  }
+
+  if (out_mode != NULL) {
+    *out_mode = parsed;
+  }
+  return true;
+}
+
+static bool annotation_included_in_export_mode(const zathura_annotation_t* ann, zathura_annotation_export_mode_t mode,
+                                               const char* filter_text) {
+  if (ann == NULL) {
+    return false;
+  }
+
+  const bool has_comm = zathura_annotation_has_comment(ann);
+  switch (mode) {
+  case ZATHURA_ANNOTATION_EXPORT_ALL_COMMENTS:
+    return has_comm;
+  case ZATHURA_ANNOTATION_EXPORT_VISIBLE_COMMENTS:
+    return has_comm && annotation_matches_filter(ann, filter_text);
+  case ZATHURA_ANNOTATION_EXPORT_HIGHLIGHTS:
+    return !has_comm;
+  case ZATHURA_ANNOTATION_EXPORT_HIGHLIGHTS_ALL_COMMENTS:
+  default:
+    return true;
+  }
+}
+
+char* zathura_annotation_format_export_list(girara_list_t* annotations, zathura_annotation_export_mode_t mode,
+                                            const char* filter_text, bool csv_format, unsigned int* exported_count) {
   if (exported_count != NULL) {
     *exported_count = 0;
   }
 
-  zathura_annotation_panel_state_t* state = get_panel_state(panel);
-  if (state == NULL) {
-    return NULL;
-  }
-
-  sync_active_editor_draft(state);
-
   GString* out       = g_string_new(csv_format ? "page,quote,comment\n" : "page\tquote\tcomment\n");
   unsigned int count = 0;
 
-  if (state->zathura != NULL && state->zathura->annotations.list != NULL) {
-    for (size_t idx = 0; idx != girara_list_size(state->zathura->annotations.list); ++idx) {
-      zathura_annotation_t* ann = girara_list_nth(state->zathura->annotations.list, idx);
-      if (ann == NULL) {
-        continue;
-      }
-
-      const bool has_comm = zathura_annotation_has_comment(ann);
-      if (!has_comm || !annotation_matches_filter(ann, state->filter_text)) {
+  if (annotations != NULL) {
+    for (size_t idx = 0; idx != girara_list_size(annotations); ++idx) {
+      zathura_annotation_t* ann = girara_list_nth(annotations, idx);
+      if (!annotation_included_in_export_mode(ann, mode, filter_text)) {
         continue;
       }
 
@@ -1285,25 +1356,116 @@ char* zathura_annotation_panel_format_export(GtkWidget* panel, bool csv_format, 
   return g_string_free(out, FALSE);
 }
 
-char* zathura_annotation_panel_get_default_export_path(zathura_t* zathura) {
+char* zathura_annotation_panel_format_export_with_mode(GtkWidget* panel, zathura_annotation_export_mode_t mode,
+                                                       bool csv_format, unsigned int* exported_count) {
+  if (exported_count != NULL) {
+    *exported_count = 0;
+  }
+
+  zathura_annotation_panel_state_t* state = get_panel_state(panel);
+  if (state == NULL) {
+    return NULL;
+  }
+
+  sync_active_editor_draft(state);
+  girara_list_t* list = (state->zathura != NULL) ? state->zathura->annotations.list : NULL;
+  return zathura_annotation_format_export_list(list, mode, state->filter_text, csv_format, exported_count);
+}
+
+char* zathura_annotation_panel_format_export(GtkWidget* panel, bool csv_format, unsigned int* exported_count) {
+  return zathura_annotation_panel_format_export_with_mode(
+      panel, ZATHURA_ANNOTATION_EXPORT_HIGHLIGHTS_ALL_COMMENTS, csv_format, exported_count);
+}
+
+char* zathura_annotation_get_default_export_path_for_file(const char* doc_path, zathura_annotation_export_mode_t mode) {
+  if (doc_path == NULL || doc_path[0] == '\0') {
+    return NULL;
+  }
+
+  const char* flag = zathura_annotation_export_mode_to_flag(mode);
+  const size_t len = strlen(doc_path);
+  if (len > 4 && g_ascii_strcasecmp(doc_path + len - 4, ".pdf") == 0) {
+    g_autofree char* stem = g_strndup(doc_path, len - 4);
+    return g_strdup_printf("%s-%s.tsv", stem, flag);
+  }
+  return g_strdup_printf("%s-%s.tsv", doc_path, flag);
+}
+
+char* zathura_annotation_panel_get_default_export_path(zathura_t* zathura, zathura_annotation_export_mode_t mode) {
   if (zathura == NULL || zathura->document == NULL) {
     return NULL;
   }
 
   const char* doc_path = zathura_document_get_path(zathura->document);
-  if (doc_path == NULL || doc_path[0] == '\0') {
-    return NULL;
-  }
-
-  const size_t len = strlen(doc_path);
-  if (len > 4 && g_ascii_strcasecmp(doc_path + len - 4, ".pdf") == 0) {
-    g_autofree char* stem = g_strndup(doc_path, len - 4);
-    return g_strdup_printf("%s-comments.tsv", stem);
-  }
-  return g_strdup_printf("%s-comments.tsv", doc_path);
+  return zathura_annotation_get_default_export_path_for_file(doc_path, mode);
 }
 
-bool zathura_annotation_panel_export(GtkWidget* panel, const char* target_path) {
+bool zathura_annotation_export_pdf_file(const char* pdf_path, const char* password,
+                                        zathura_annotation_export_mode_t mode, const char* target_path,
+                                        char** out_resolved_path, unsigned int* out_exported_count, GError** error) {
+  if (out_resolved_path != NULL) {
+    *out_resolved_path = NULL;
+  }
+  if (out_exported_count != NULL) {
+    *out_exported_count = 0;
+  }
+  if (pdf_path == NULL || pdf_path[0] == '\0') {
+    g_set_error_literal(error, G_FILE_ERROR, G_FILE_ERROR_INVAL, "Missing input PDF path");
+    return false;
+  }
+
+  girara_list_t* list = girara_list_new_with_free((girara_free_function_t)zathura_annotation_free);
+  if (!zathura_annotations_load_pdf_file(list, pdf_path, password)) {
+    girara_list_free(list);
+    g_set_error(error, G_FILE_ERROR, G_FILE_ERROR_FAILED, "Failed to read PDF annotations from '%s'", pdf_path);
+    return false;
+  }
+
+  g_autofree char* resolved_path = NULL;
+  if (target_path != NULL && target_path[0] != '\0') {
+    resolved_path = girara_fix_path(target_path);
+    if (resolved_path == NULL) {
+      resolved_path = g_strdup(target_path);
+    }
+  } else {
+    resolved_path = zathura_annotation_get_default_export_path_for_file(pdf_path, mode);
+  }
+  if (resolved_path == NULL) {
+    girara_list_free(list);
+    g_set_error_literal(error, G_FILE_ERROR, G_FILE_ERROR_INVAL, "Failed to determine output export path");
+    return false;
+  }
+
+  bool csv_format       = false;
+  const size_t path_len = strlen(resolved_path);
+  if (path_len > 4 && g_ascii_strcasecmp(resolved_path + path_len - 4, ".csv") == 0) {
+    csv_format = true;
+  }
+
+  unsigned int exported_count = 0;
+  g_autofree char* content    = zathura_annotation_format_export_list(list, mode, NULL, csv_format, &exported_count);
+  girara_list_free(list);
+
+  if (content == NULL) {
+    g_set_error_literal(error, G_FILE_ERROR, G_FILE_ERROR_FAILED, "Failed to format exported annotations");
+    return false;
+  }
+
+  if (!g_file_set_contents(resolved_path, content, -1, error)) {
+    return false;
+  }
+
+  if (out_resolved_path != NULL) {
+    *out_resolved_path = g_steal_pointer(&resolved_path);
+  }
+  if (out_exported_count != NULL) {
+    *out_exported_count = exported_count;
+  }
+  return true;
+}
+
+bool zathura_annotation_panel_export_with_mode(GtkWidget* panel, zathura_annotation_export_mode_t mode,
+                                               const char* target_path) {
   zathura_annotation_panel_state_t* state = get_panel_state(panel);
   if (state == NULL) {
     return false;
@@ -1316,7 +1478,7 @@ bool zathura_annotation_panel_export(GtkWidget* panel, const char* target_path) 
       resolved_path = g_strdup(target_path);
     }
   } else {
-    resolved_path = zathura_annotation_panel_get_default_export_path(state->zathura);
+    resolved_path = zathura_annotation_panel_get_default_export_path(state->zathura, mode);
   }
 
   bool csv_format = false;
@@ -1328,7 +1490,8 @@ bool zathura_annotation_panel_export(GtkWidget* panel, const char* target_path) 
   }
 
   unsigned int exported_count = 0;
-  g_autofree char* content    = zathura_annotation_panel_format_export(panel, csv_format, &exported_count);
+  g_autofree char* content =
+      zathura_annotation_panel_format_export_with_mode(panel, mode, csv_format, &exported_count);
   if (content == NULL) {
     return false;
   }
@@ -1347,25 +1510,33 @@ bool zathura_annotation_panel_export(GtkWidget* panel, const char* target_path) 
     }
   }
 
+  const char* flag = zathura_annotation_export_mode_to_flag(mode);
+
   if (resolved_path != NULL) {
     g_autoptr(GError) error = NULL;
     if (!g_file_set_contents(resolved_path, content, -1, &error)) {
       if (state->zathura != NULL && state->zathura->ui.session != NULL) {
-        girara_notify(state->zathura->ui.session, GIRARA_ERROR, _("Failed to export comments to %s: %s"),
-                      resolved_path, error != NULL ? error->message : _("unknown error"));
+        girara_notify(state->zathura->ui.session, GIRARA_ERROR, _("Failed to export annotations (+%s) to %s: %s"),
+                      flag, resolved_path, error != NULL ? error->message : _("unknown error"));
       }
       return false;
     }
 
     if (state->zathura != NULL && state->zathura->ui.session != NULL) {
-      girara_notify(state->zathura->ui.session, GIRARA_INFO, _("Exported %u comment(s) to %s and clipboard."),
-                    exported_count, resolved_path);
+      girara_notify(state->zathura->ui.session, GIRARA_INFO,
+                    _("Exported %u entry(s) (+%s) to %s and clipboard."), exported_count, flag, resolved_path);
     }
     return true;
   }
 
   if (state->zathura != NULL && state->zathura->ui.session != NULL) {
-    girara_notify(state->zathura->ui.session, GIRARA_INFO, _("Copied %u comment(s) to clipboard."), exported_count);
+    girara_notify(state->zathura->ui.session, GIRARA_INFO, _("Copied %u entry(s) (+%s) to clipboard."), exported_count,
+                  flag);
   }
   return true;
+}
+
+bool zathura_annotation_panel_export(GtkWidget* panel, const char* target_path) {
+  return zathura_annotation_panel_export_with_mode(panel, ZATHURA_ANNOTATION_EXPORT_HIGHLIGHTS_ALL_COMMENTS,
+                                                   target_path);
 }

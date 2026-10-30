@@ -74,14 +74,14 @@ if get_option('shell-completions').allowed()
 
   bash_comp = dependency('bash-completion', required: false)
   if bash_comp.found()
-    bash_compdir = bash_comp.get_variable(pkgconfig: 'completionsdir')
+    bash_compdir = bash_comp.get_variable(pkgconfig: 'completionsdir', default_value: join_paths(datadir, 'bash-completion', 'completions'))
   else
     bash_compdir = join_paths(datadir, 'bash-completion', 'completions')
   endif
 
   fish_comp = dependency('fish', required: false)
   if fish_comp.found()
-    fish_compdir = fish_comp.get_variable(pkgconfig: 'completionsdir')
+    fish_compdir = fish_comp.get_variable(pkgconfig: 'completionsdir', default_value: join_paths(datadir, 'fish', 'vendor_completions.d'))
   else
     fish_compdir = join_paths(datadir, 'fish', 'vendor_completions.d')
   endif

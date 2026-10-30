@@ -323,3 +323,42 @@ girara_completion_t* cc_export(girara_session_t* session, const char* input) {
 
   return g_steal_pointer(&completion);
 }
+
+girara_completion_t* cc_comments(girara_session_t* session, const char* input) {
+  g_return_val_if_fail(session != NULL, NULL);
+
+  const char* query = (input != NULL) ? input : "";
+  const size_t len  = strlen(query);
+
+  g_autoptr(girara_completion_t) completion  = girara_completion_init();
+  g_autoptr(girara_completion_group_t) group = girara_completion_group_create(_("Comments"));
+  if (completion == NULL || group == NULL) {
+    return NULL;
+  }
+
+  static const struct {
+    const char* value;
+    const char* description;
+  } items[] = {
+      {"export +highlights_all_comments", N_("Export all highlights and all comments (default)")},
+      {"export +all_comments", N_("Export all comments")},
+      {"export +visible_comments", N_("Export currently filtered/visible comments")},
+      {"export +highlights", N_("Export highlights without comments")},
+      {"open", N_("Open comment side panel")},
+      {"close", N_("Close comment side panel")},
+      {"toggle", N_("Toggle comment side panel")},
+      {"rollup", N_("Roll up all comment cards")},
+      {"expand", N_("Expand all comment cards")},
+      {"filter ", N_("Filter comments by word or phrase")},
+      {"clear-filter", N_("Clear active comment filter")},
+  };
+
+  for (size_t i = 0; i < G_N_ELEMENTS(items); ++i) {
+    if (len <= strlen(items[i].value) && g_ascii_strncasecmp(query, items[i].value, len) == 0) {
+      girara_completion_group_add_element(group, items[i].value, _(items[i].description));
+    }
+  }
+
+  girara_completion_add_group(completion, g_steal_pointer(&group));
+  return g_steal_pointer(&completion);
+}

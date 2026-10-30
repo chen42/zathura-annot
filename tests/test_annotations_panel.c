@@ -446,13 +446,15 @@ static void test_panel_export_tsv_respects_filter_and_writes_file(void) {
   zathura_annotation_t* a2 = zathura_annotation_new(
       1, ZATHURA_ANNOTATION_COLOR_RED, r1, "Second quote", "Dopamine D2 receptor assay");
   zathura_annotation_t* a3 = zathura_annotation_new(
-      2, ZATHURA_ANNOTATION_COLOR_RED, r1, "Resolved quote", "Resolved note about dopamine");
-  a3->resolved = true;
+      2, ZATHURA_ANNOTATION_COLOR_RED, r1, "Third quote", "Note about dopamine");
+  zathura_annotation_t* a4 = zathura_annotation_new(
+      2, ZATHURA_ANNOTATION_COLOR_YELLOW, r1, "Highlight only quote", "");
   girara_list_free(r1);
 
   zathura_annotations_add(zathura, a1);
   zathura_annotations_add(zathura, a2);
   zathura_annotations_add(zathura, a3);
+  zathura_annotations_add(zathura, a4);
 
   gtk_widget_set_visible(panel, TRUE);
   zathura_annotation_panel_refresh(panel);
@@ -461,29 +463,64 @@ static void test_panel_export_tsv_respects_filter_and_writes_file(void) {
   g_assert_nonnull(export_btn);
   g_assert_true(gtk_widget_get_sensitive(export_btn));
 
-  /* 1. Default view (all 3 comments): 3 rows exported, newlines/tabs replaced with spaces */
+  /* Verify default export file paths include the export flag */
+  g_autofree char* path_default = zathura_annotation_get_default_export_path_for_file(
+      "/tmp/paper.pdf", ZATHURA_ANNOTATION_EXPORT_HIGHLIGHTS_ALL_COMMENTS);
+  g_autofree char* path_all_comm = zathura_annotation_get_default_export_path_for_file(
+      "/tmp/paper.pdf", ZATHURA_ANNOTATION_EXPORT_ALL_COMMENTS);
+  g_autofree char* path_vis_comm = zathura_annotation_get_default_export_path_for_file(
+      "/tmp/paper.pdf", ZATHURA_ANNOTATION_EXPORT_VISIBLE_COMMENTS);
+  g_autofree char* path_hl = zathura_annotation_get_default_export_path_for_file(
+      "/tmp/paper.pdf", ZATHURA_ANNOTATION_EXPORT_HIGHLIGHTS);
+  g_assert_cmpstr(path_default, ==, "/tmp/paper-highlights_all_comments.tsv");
+  g_assert_cmpstr(path_all_comm, ==, "/tmp/paper-all_comments.tsv");
+  g_assert_cmpstr(path_vis_comm, ==, "/tmp/paper-visible_comments.tsv");
+  g_assert_cmpstr(path_hl, ==, "/tmp/paper-highlights.tsv");
+
+  /* 1. Default mode (+highlights_all_comments): all 4 entries (3 comments + 1 highlight) */
   unsigned int count   = 0;
   g_autofree char* tsv = zathura_annotation_panel_format_export(panel, false, &count);
-  g_assert_cmpuint(count, ==, 3);
+  g_assert_cmpuint(count, ==, 4);
   g_assert_cmpstr(tsv, ==,
                   "page\tquote\tcomment\n"
                   "1\tFirst quote with tab\tLine 1 of comment Line 2 Line 3 with tab\n"
                   "2\tSecond quote\tDopamine D2 receptor assay\n"
-                  "3\tResolved quote\tResolved note about dopamine\n");
+                  "3\tThird quote\tNote about dopamine\n"
+                  "3\tHighlight only quote\t\n");
 
-  /* 2. Filter active ("dopamine"): exports matching comments */
+  /* 2. +all_comments mode: 3 comments, ignoring active filter */
   zathura_annotation_panel_set_filter_text(panel, "dopamine");
-  g_autofree char* filtered_tsv = zathura_annotation_panel_format_export(panel, false, &count);
+  g_autofree char* all_comm_tsv = zathura_annotation_panel_format_export_with_mode(
+      panel, ZATHURA_ANNOTATION_EXPORT_ALL_COMMENTS, false, &count);
+  g_assert_cmpuint(count, ==, 3);
+  g_assert_cmpstr(all_comm_tsv, ==,
+                  "page\tquote\tcomment\n"
+                  "1\tFirst quote with tab\tLine 1 of comment Line 2 Line 3 with tab\n"
+                  "2\tSecond quote\tDopamine D2 receptor assay\n"
+                  "3\tThird quote\tNote about dopamine\n");
+
+  /* 3. +visible_comments mode: exports only comments matching active filter ("dopamine") */
+  g_autofree char* filtered_tsv = zathura_annotation_panel_format_export_with_mode(
+      panel, ZATHURA_ANNOTATION_EXPORT_VISIBLE_COMMENTS, false, &count);
   g_assert_cmpuint(count, ==, 2);
   g_assert_cmpstr(filtered_tsv, ==,
                   "page\tquote\tcomment\n"
                   "2\tSecond quote\tDopamine D2 receptor assay\n"
-                  "3\tResolved quote\tResolved note about dopamine\n");
+                  "3\tThird quote\tNote about dopamine\n");
 
-  /* 3. Export via :comments export <path.tsv> writes the file */
+  /* 4. +highlights mode: exports only highlight-only annotations */
+  g_autofree char* highlights_tsv = zathura_annotation_panel_format_export_with_mode(
+      panel, ZATHURA_ANNOTATION_EXPORT_HIGHLIGHTS, false, &count);
+  g_assert_cmpuint(count, ==, 1);
+  g_assert_cmpstr(highlights_tsv, ==,
+                  "page\tquote\tcomment\n"
+                  "3\tHighlight only quote\t\n");
+
+  /* 5. Export via :comments export +visibile_comments <path.tsv> writes the filtered file */
   g_autofree char* tmp_tsv = g_build_filename(g_get_tmp_dir(), "zathura-test-comments-export.tsv", NULL);
   girara_list_t* args_exp  = girara_list_new();
   girara_list_append(args_exp, (void*)"export");
+  girara_list_append(args_exp, (void*)"+visibile_comments");
   girara_list_append(args_exp, tmp_tsv);
   g_assert_true(cmd_comments(session, args_exp));
   girara_list_free(args_exp);

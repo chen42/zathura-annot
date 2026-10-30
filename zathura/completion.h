@@ -43,4 +43,13 @@ girara_completion_t* cc_bookmarks(girara_session_t* session, const char* input);
  */
 girara_completion_t* cc_export(girara_session_t* session, const char* input);
 
+/**
+ * Completion for the comments command
+ *
+ * @param session the girara session
+ * @param input the current input
+ * @return completion object, NULL on error
+ */
+girara_completion_t* cc_comments(girara_session_t* session, const char* input);
+
 #endif // COMPLETION_H
