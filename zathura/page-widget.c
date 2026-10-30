@@ -1449,12 +1449,12 @@ static void cb_zathura_page_widget_button_release_event(GtkGestureClick* gesture
         zathura_annotations_queue_draw_all(priv->zathura);
       } else if (priv->zathura->ui.annotation_panel != NULL &&
                  gtk_widget_get_visible(priv->zathura->ui.annotation_panel)) {
-        zathura_annotation_panel_refresh(priv->zathura->ui.annotation_panel);
+        zathura_annotation_panel_focus_annotation(priv->zathura->ui.annotation_panel, NULL);
       }
     } else {
       zathura_annotations_set_active(priv->zathura, NULL);
       if (priv->zathura->ui.annotation_panel != NULL && gtk_widget_get_visible(priv->zathura->ui.annotation_panel)) {
-        zathura_annotation_panel_refresh(priv->zathura->ui.annotation_panel);
+        zathura_annotation_panel_focus_annotation(priv->zathura->ui.annotation_panel, NULL);
       }
       if (priv->zathura->global.double_click_follow == false) {
         evaluate_link_at_mouse_position(page, oldx, oldy);
@@ -1724,10 +1724,6 @@ static void zathura_page_widget_popup_menu(GtkWidget* widget, double x, double y
     GMenu* model = g_menu_new();
     g_menu_append(model, zathura_annotation_has_comment(hit) ? _("Edit comment") : _("Add comment"),
                   "annotation.edit");
-    if (zathura_annotation_has_comment(hit)) {
-      g_menu_append(model, hit->resolved ? _("Unresolve comment") : _("Resolve comment"),
-                    "annotation.toggle-resolved");
-    }
     g_menu_append(model, _("Remove highlight"), "annotation.delete");
 
     if (priv->annotation_popover == NULL) {
@@ -1861,9 +1857,6 @@ static void cb_menu_annotation_edit(GSimpleAction* UNUSED(action), GVariant* UNU
   zathura_annotations_start_edit(priv->zathura, ann->id, false);
   if (priv->zathura->ui.annotation_panel != NULL) {
     gtk_widget_set_visible(priv->zathura->ui.annotation_panel, TRUE);
-    if (ann->resolved) {
-      zathura_annotation_panel_set_show_resolved(priv->zathura->ui.annotation_panel, true);
-    }
     zathura_annotation_panel_start_edit(priv->zathura->ui.annotation_panel, ann->id, false);
   }
   zathura_page_widget_redraw_canvas(page);

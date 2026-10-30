@@ -760,6 +760,10 @@ bool cmd_comments(girara_session_t* session, girara_list_t* argument_list) {
       zathura_annotation_panel_set_filter_text(zathura->ui.annotation_panel, "");
       return true;
     }
+    if (g_strcmp0(arg, "export") == 0) {
+      const char* target_path = girara_list_size(argument_list) > 1 ? girara_list_nth(argument_list, 1) : NULL;
+      return zathura_annotation_panel_export(zathura->ui.annotation_panel, target_path);
+    }
   }
 
   return sc_toggle_annotations(session, NULL, NULL, 0);
