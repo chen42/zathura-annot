@@ -255,6 +255,83 @@ static void test_panel_girara_key_guard_when_focused(void) {
   zathura_free(zathura);
 }
 
+static void test_panel_roll_up_all_and_expand_one_by_one(void) {
+  zathura_t* zathura = create_test_zathura();
+  GtkWidget* panel   = zathura->ui.annotation_panel;
+  g_assert_nonnull(panel);
+
+  girara_list_t* r1 = girara_list_new_with_free(g_free);
+  append_rect(r1, 10.0, 20.0, 100.0, 35.0);
+
+  zathura_annotation_t* a1 = zathura_annotation_new(
+      0, ZATHURA_ANNOTATION_COLOR_RED, r1, "First quote", "First line of comment 1\nSecond line of comment 1");
+  zathura_annotation_t* a2 = zathura_annotation_new(
+      0, ZATHURA_ANNOTATION_COLOR_RED, r1, "Second quote", "Only first line of comment 2\nDetails of comment 2");
+  g_autofree char* id1 = g_strdup(a1->id);
+  g_autofree char* id2 = g_strdup(a2->id);
+  girara_list_free(r1);
+
+  zathura_annotations_add(zathura, a1);
+  zathura_annotations_add(zathura, a2);
+
+  gtk_widget_set_visible(panel, TRUE);
+  zathura_annotation_panel_refresh(panel);
+
+  g_assert_false(zathura_annotation_panel_are_all_collapsed(panel));
+  g_assert_false(zathura_annotation_panel_is_annotation_collapsed(panel, id1));
+  g_assert_false(zathura_annotation_panel_is_annotation_collapsed(panel, id2));
+
+  /* Global roll up: all comments collapse and show only the first line */
+  GtkWidget* collapse_all_btn = find_widget_by_css_class(panel, "annotation-collapse-all-btn");
+  g_assert_nonnull(collapse_all_btn);
+  g_assert_cmpstr(gtk_button_get_label(GTK_BUTTON(collapse_all_btn)), ==, "Roll up");
+
+  zathura_annotation_panel_set_all_collapsed(panel, true);
+  g_assert_true(zathura_annotation_panel_are_all_collapsed(panel));
+  g_assert_true(zathura_annotation_panel_is_annotation_collapsed(panel, id1));
+  g_assert_true(zathura_annotation_panel_is_annotation_collapsed(panel, id2));
+  g_assert_cmpstr(gtk_button_get_label(GTK_BUTTON(collapse_all_btn)), ==, "Expand all");
+
+  GtkWidget* first_collapsed_card = find_widget_by_css_class(panel, "collapsed");
+  g_assert_nonnull(first_collapsed_card);
+  GtkWidget* comment_label = find_widget_by_css_class(first_collapsed_card, "annotation-comment-body");
+  g_assert_nonnull(comment_label);
+  g_assert_cmpstr(gtk_label_get_text(GTK_LABEL(comment_label)), ==, "First line of comment 1");
+  g_assert_null(find_widget_by_css_class(first_collapsed_card, "annotation-quote"));
+
+  /* Expand comment 1 individually while comment 2 stays rolled up */
+  zathura_annotation_panel_set_annotation_collapsed(panel, id1, false);
+  g_assert_false(zathura_annotation_panel_is_annotation_collapsed(panel, id1));
+  g_assert_true(zathura_annotation_panel_is_annotation_collapsed(panel, id2));
+  g_assert_false(zathura_annotation_panel_are_all_collapsed(panel));
+  g_assert_cmpstr(gtk_button_get_label(GTK_BUTTON(collapse_all_btn)), ==, "Roll up");
+
+  zathura_free(zathura);
+}
+
+static void test_panel_mouse_wheel_scroll(void) {
+  zathura_t* zathura = create_test_zathura();
+  GtkWidget* panel   = zathura->ui.annotation_panel;
+  g_assert_nonnull(panel);
+
+  gtk_widget_set_visible(panel, TRUE);
+  GtkAdjustment* vadj = zathura_annotation_panel_get_vadjustment(panel);
+  g_assert_nonnull(vadj);
+
+  gtk_adjustment_configure(vadj, 0.0, 0.0, 600.0, 40.0, 200.0, 200.0);
+  g_assert_cmpfloat_with_epsilon(gtk_adjustment_get_value(vadj), 0.0, 1e-6);
+
+  /* Scroll down two wheel steps */
+  g_assert_true(zathura_annotation_panel_scroll(panel, 0.0, 2.0));
+  g_assert_cmpfloat_with_epsilon(gtk_adjustment_get_value(vadj), 80.0, 1e-6);
+
+  /* Scroll up one wheel step */
+  g_assert_true(zathura_annotation_panel_scroll(panel, 0.0, -1.0));
+  g_assert_cmpfloat_with_epsilon(gtk_adjustment_get_value(vadj), 40.0, 1e-6);
+
+  zathura_free(zathura);
+}
+
 int main(int argc, char* argv[]) {
   setup_logger();
   gtk_init();
@@ -269,6 +346,9 @@ int main(int argc, char* argv[]) {
                   test_panel_editor_draft_survival_across_refresh);
   g_test_add_func("/annotations/panel/toggle_command_and_shortcut", test_panel_toggle_command_and_shortcut);
   g_test_add_func("/annotations/panel/girara_key_guard_when_focused", test_panel_girara_key_guard_when_focused);
+  g_test_add_func("/annotations/panel/roll_up_all_and_expand_one_by_one",
+                  test_panel_roll_up_all_and_expand_one_by_one);
+  g_test_add_func("/annotations/panel/mouse_wheel_scroll", test_panel_mouse_wheel_scroll);
 
   return g_test_run();
 }

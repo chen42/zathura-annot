@@ -81,6 +81,16 @@
   padding: 7px 9px;
 }
 
+#@session@ .annotation-card.collapsed {
+  margin: 2px 8px;
+  padding: 4px 8px;
+}
+
+#@session@ button.annotation-collapse-btn {
+  padding: 0px 4px;
+  min-height: 12px;
+}
+
 #@session@ .annotation-card.yellow {
   border-left: 3px solid #d8b228;
 }

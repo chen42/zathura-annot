@@ -237,6 +237,12 @@ struct girara_session_private_s {
     size_t previous_length;
     bool command_mode;
   } completion;
+
+  struct {
+    double x;
+    double y;
+    bool has_position;
+  } pointer;
 };
 
 typedef struct gdk_keyboard_button_s {

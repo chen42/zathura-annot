@@ -325,6 +325,8 @@ bool girara_session_init(girara_session_t* session, const char* sessionname) {
   gtk_widget_add_controller(session->gtk.view, GTK_EVENT_CONTROLLER(click));
 
   GtkEventController* motion = gtk_event_controller_motion_new();
+  gtk_event_controller_set_propagation_phase(motion, GTK_PHASE_CAPTURE);
+  g_signal_connect(motion, "enter", G_CALLBACK(girara_callback_view_button_motion_notify_event), session);
   g_signal_connect(motion, "motion", G_CALLBACK(girara_callback_view_button_motion_notify_event), session);
   gtk_widget_add_controller(session->gtk.view, motion);
 

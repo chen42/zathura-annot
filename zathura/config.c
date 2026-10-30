@@ -527,7 +527,7 @@ void config_load_default(zathura_t* zathura) {
   girara_setting_add(gsession, "statusbar-v-padding",      &statusbar_v_padding, INT,     TRUE,  _("Vertical padding for the status, input, and notification bars"), NULL, NULL);
   girara_setting_add(gsession, "n-completion-items",       &n_completion_items,  UINT,    TRUE,  _("Number of completion items"), NULL, NULL);
   girara_setting_add(gsession, "exec-command",             "",                   STRING,  FALSE, _("Command to execute in :exec"), NULL, NULL);
-  girara_setting_add(gsession, "guioptions",               "s",                  STRING,  FALSE, _("Show or hide certain GUI elements"), cb_guioptions, NULL);
+  girara_setting_add(gsession, "guioptions",               "sh",                 STRING,  FALSE, _("Show or hide certain GUI elements"), cb_guioptions, NULL);
 
   girara_setting_add(gsession, "database",              DEFAULT_DB,   STRING, true,  _("Database backend"),         NULL, NULL);
   girara_setting_add(gsession, "filemonitor",           "glib",       STRING, true,  _("File monitor backend"),     NULL, NULL);

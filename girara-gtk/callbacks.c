@@ -248,6 +248,12 @@ gboolean girara_callback_view_button_press_event(GtkGestureClick* gesture, gint 
                                                  girara_session_t* session) {
   g_return_val_if_fail(session != NULL, false);
 
+  if (session->private_data != NULL) {
+    session->private_data->pointer.x            = x;
+    session->private_data->pointer.y            = y;
+    session->private_data->pointer.has_position = true;
+  }
+
   if (point_in_annotation_panel(session, x, y)) {
     return false;
   }
@@ -287,6 +293,12 @@ gboolean girara_callback_view_button_release_event(GtkGestureClick* gesture, gin
                                                    girara_session_t* session) {
   g_return_val_if_fail(session != NULL, false);
 
+  if (session->private_data != NULL) {
+    session->private_data->pointer.x            = x;
+    session->private_data->pointer.y            = y;
+    session->private_data->pointer.has_position = true;
+  }
+
   if (point_in_annotation_panel(session, x, y)) {
     return false;
   }
@@ -314,6 +326,12 @@ gboolean girara_callback_view_button_release_event(GtkGestureClick* gesture, gin
 
 static gboolean dispatch_mouse_motion(girara_session_t* session, double x, double y, GdkModifierType mods) {
   g_return_val_if_fail(session != NULL, false);
+
+  if (session->private_data != NULL) {
+    session->private_data->pointer.x            = x;
+    session->private_data->pointer.y            = y;
+    session->private_data->pointer.has_position = true;
+  }
 
   if (point_in_annotation_panel(session, x, y)) {
     return false;
@@ -360,9 +378,19 @@ bool girara_has_mouse_event(girara_session_t* session, girara_event_type_t type,
 }
 
 /* recover the pointer position of a scroll event in widget coordinates (gtk3 scroll->x/y parity) */
-static void scroll_event_position(GtkEventControllerScroll* controller, double* x, double* y) {
+static void scroll_event_position(GtkEventControllerScroll* controller, girara_session_t* session, double* x,
+                                  double* y) {
   *x = 0.0;
   *y = 0.0;
+
+  if (session != NULL && session->private_data != NULL && session->private_data->pointer.has_position) {
+    *x = session->private_data->pointer.x;
+    *y = session->private_data->pointer.y;
+  }
+
+  if (controller == NULL) {
+    return;
+  }
 
   GtkWidget* widget = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(controller));
   GdkEvent* event   = gtk_event_controller_get_current_event(GTK_EVENT_CONTROLLER(controller));
@@ -395,7 +423,7 @@ gboolean girara_callback_view_scroll_event(GtkEventControllerScroll* controller,
   g_return_val_if_fail(session != NULL, false);
 
   girara_event_t event = {.x = 0, .y = 0};
-  scroll_event_position(controller, &event.x, &event.y);
+  scroll_event_position(controller, session, &event.x, &event.y);
   if (point_in_annotation_panel(session, event.x, event.y)) {
     return false;
   }

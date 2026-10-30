@@ -9,6 +9,7 @@
 #include "adjustment.h"
 #include "annotation-panel.h"
 #include "annotations-pdf.h"
+#include "document-widget.h"
 #include "document.h"
 #include "page-widget.h"
 #include "page.h"
@@ -581,6 +582,10 @@ void zathura_annotations_reveal(zathura_t* zathura, const zathura_annotation_t* 
     return;
   }
 
+  const double saved_pos_x = zathura->ui.document_widget != NULL
+                                 ? zathura_document_widget_get_position_x(zathura->ui.document_widget)
+                                 : -1.0;
+
   page_set(zathura, annotation->page);
 
   zathura_page_t* page = zathura_document_get_page(zathura->document, annotation->page);
@@ -596,6 +601,16 @@ void zathura_annotations_reveal(zathura_t* zathura, const zathura_annotation_t* 
     double pos_x    = 0.0;
     double pos_y    = 0.0;
     page_number_to_position(zathura, annotation->page, center_x, center_y, &pos_x, &pos_y);
+
+    if (zathura->ui.document_widget != NULL && saved_pos_x >= 0.0) {
+      unsigned int cell_h = 0, cell_w = 0, view_h = 0, view_w = 0;
+      zathura_document_widget_get_cell_size(zathura->ui.document_widget, annotation->page, &cell_h, &cell_w);
+      zathura_document_widget_get_viewport_size(zathura->ui.document_widget, &view_h, &view_w);
+      if (zathura_document_widget_get_pages_per_row(zathura->ui.document_widget) == 1 && cell_w <= view_w) {
+        pos_x = saved_pos_x;
+      }
+    }
+
     position_set(zathura, pos_x, pos_y);
   }
 

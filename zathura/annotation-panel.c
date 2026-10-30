@@ -15,17 +15,25 @@ typedef struct zathura_annotation_panel_state_s {
   zathura_t* zathura;
   GtkWidget* root;
   GtkWidget* count_label;
+  GtkWidget* collapse_all_btn;
   GtkWidget* show_resolved_check;
   GtkWidget* scrolled_window;
   GtkWidget* list_box;
   GtkWidget* active_editor;
+  GHashTable* collapsed_ids;
   bool show_resolved;
   unsigned int card_count;
+  unsigned int collapsed_count;
   bool updating_toggle;
 } zathura_annotation_panel_state_t;
 
 static void panel_state_free(gpointer data) {
-  g_free(data);
+  zathura_annotation_panel_state_t* state = data;
+  if (state != NULL && state->collapsed_ids != NULL) {
+    g_hash_table_destroy(state->collapsed_ids);
+    state->collapsed_ids = NULL;
+  }
+  g_free(state);
 }
 
 static zathura_annotation_panel_state_t* get_panel_state(GtkWidget* panel) {
@@ -257,7 +265,68 @@ static void cb_close_panel_clicked(GtkButton* UNUSED(button), gpointer user_data
   }
 }
 
+static void cb_panel_visible_notify(GObject* UNUSED(object), GParamSpec* UNUSED(pspec), gpointer user_data) {
+  zathura_annotation_panel_state_t* state = user_data;
+  if (state != NULL && state->zathura != NULL && state->zathura->ui.document_widget != NULL) {
+    gtk_widget_queue_allocate(GTK_WIDGET(state->zathura->ui.document_widget));
+  }
+}
+
+static bool is_annotation_collapsed(zathura_annotation_panel_state_t* state, const char* annotation_id) {
+  if (state == NULL || state->collapsed_ids == NULL || annotation_id == NULL) {
+    return false;
+  }
+  return g_hash_table_contains(state->collapsed_ids, annotation_id);
+}
+
+static char* extract_first_line(const char* text) {
+  if (text == NULL) {
+    return g_strdup("");
+  }
+  while (*text == '\r' || *text == '\n') {
+    ++text;
+  }
+  const char* end = text;
+  while (*end != '\0' && *end != '\r' && *end != '\n') {
+    ++end;
+  }
+  return g_strndup(text, (gsize)(end - text));
+}
+
+static void cb_card_collapse_clicked(GtkButton* button, gpointer user_data) {
+  zathura_annotation_panel_state_t* state = user_data;
+  const char* id                          = g_object_get_data(G_OBJECT(button), "zathura-annotation-id");
+  if (state == NULL || id == NULL) {
+    return;
+  }
+
+  const bool collapsed = is_annotation_collapsed(state, id);
+  zathura_annotation_panel_set_annotation_collapsed(state->root, id, !collapsed);
+}
+
+static void cb_collapse_all_clicked(GtkButton* UNUSED(button), gpointer user_data) {
+  zathura_annotation_panel_state_t* state = user_data;
+  if (state == NULL || state->root == NULL) {
+    return;
+  }
+
+  const bool collapse_all = !zathura_annotation_panel_are_all_collapsed(state->root);
+  zathura_annotation_panel_set_all_collapsed(state->root, collapse_all);
+}
+
+static gboolean cb_panel_scroll(GtkEventControllerScroll* controller, gdouble dx, gdouble dy, gpointer user_data) {
+  GtkWidget* panel = GTK_WIDGET(user_data);
+  double wheel_dy  = dy;
+  if (controller != NULL && gtk_event_controller_scroll_get_unit(controller) == GDK_SCROLL_UNIT_SURFACE) {
+    wheel_dy = dy / 56.0;
+  }
+  return zathura_annotation_panel_scroll(panel, dx, wheel_dy) ? TRUE : FALSE;
+}
+
 static GtkWidget* create_card_widget(zathura_annotation_panel_state_t* state, zathura_annotation_t* ann) {
+  const bool is_editing   = (g_strcmp0(ann->id, state->zathura->annotations.editing_id) == 0);
+  const bool is_collapsed = !is_editing && is_annotation_collapsed(state, ann->id);
+
   GtkWidget* card = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
   gtk_widget_add_css_class(card, "annotation-card");
   gtk_widget_add_css_class(card, ann->color == ZATHURA_ANNOTATION_COLOR_RED ? "red" : "yellow");
@@ -267,6 +336,9 @@ static GtkWidget* create_card_widget(zathura_annotation_panel_state_t* state, za
   if (ann->resolved) {
     gtk_widget_add_css_class(card, "resolved");
   }
+  if (is_collapsed) {
+    gtk_widget_add_css_class(card, "collapsed");
+  }
   g_object_set_data(G_OBJECT(card), "zathura-panel-state", state);
   g_object_set_data_full(G_OBJECT(card), "zathura-annotation-id", g_strdup(ann->id), g_free);
 
@@ -275,8 +347,48 @@ static GtkWidget* create_card_widget(zathura_annotation_panel_state_t* state, za
   g_signal_connect(card_click, "pressed", G_CALLBACK(cb_card_clicked), card);
   gtk_widget_add_controller(card, GTK_EVENT_CONTROLLER(card_click));
 
-  /* 1. Top row: quoted snippet on the left, delete (×) button on the top right */
+  if (is_collapsed) {
+    GtkWidget* top_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+
+    GtkWidget* collapse_btn = gtk_button_new_with_label("▸");
+    gtk_widget_add_css_class(collapse_btn, "annotation-card-btn");
+    gtk_widget_add_css_class(collapse_btn, "annotation-collapse-btn");
+    gtk_widget_add_css_class(collapse_btn, "flat");
+    gtk_widget_set_valign(collapse_btn, GTK_ALIGN_CENTER);
+    gtk_widget_set_tooltip_text(collapse_btn, _("Expand comment"));
+    g_object_set_data_full(G_OBJECT(collapse_btn), "zathura-annotation-id", g_strdup(ann->id), g_free);
+    g_signal_connect(collapse_btn, "clicked", G_CALLBACK(cb_card_collapse_clicked), state);
+    gtk_box_append(GTK_BOX(top_row), collapse_btn);
+
+    g_autofree char* first_line = extract_first_line(ann->comment);
+    GtkWidget* comment_label    = gtk_label_new(first_line);
+    gtk_widget_add_css_class(comment_label, "annotation-comment-body");
+    gtk_widget_add_css_class(comment_label, "collapsed");
+    gtk_label_set_wrap(GTK_LABEL(comment_label), FALSE);
+    gtk_label_set_single_line_mode(GTK_LABEL(comment_label), TRUE);
+    gtk_label_set_ellipsize(GTK_LABEL(comment_label), PANGO_ELLIPSIZE_END);
+    gtk_label_set_xalign(GTK_LABEL(comment_label), 0.0f);
+    gtk_widget_set_hexpand(comment_label, TRUE);
+    gtk_widget_set_valign(comment_label, GTK_ALIGN_CENTER);
+    gtk_box_append(GTK_BOX(top_row), comment_label);
+
+    gtk_box_append(GTK_BOX(card), top_row);
+    return card;
+  }
+
+  /* 1. Top row: collapse button, quoted snippet, delete (×) button on the top right */
   GtkWidget* top_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+
+  GtkWidget* collapse_btn = gtk_button_new_with_label("▾");
+  gtk_widget_add_css_class(collapse_btn, "annotation-card-btn");
+  gtk_widget_add_css_class(collapse_btn, "annotation-collapse-btn");
+  gtk_widget_add_css_class(collapse_btn, "flat");
+  gtk_widget_set_valign(collapse_btn, GTK_ALIGN_START);
+  gtk_widget_set_tooltip_text(collapse_btn, _("Roll up comment"));
+  g_object_set_data_full(G_OBJECT(collapse_btn), "zathura-annotation-id", g_strdup(ann->id), g_free);
+  g_signal_connect(collapse_btn, "clicked", G_CALLBACK(cb_card_collapse_clicked), state);
+  gtk_box_append(GTK_BOX(top_row), collapse_btn);
+
   if (ann->quote != NULL && ann->quote[0] != '\0') {
     GtkWidget* quote_label = gtk_label_new(ann->quote);
     gtk_widget_add_css_class(quote_label, "annotation-quote");
@@ -304,7 +416,6 @@ static GtkWidget* create_card_widget(zathura_annotation_panel_state_t* state, za
   gtk_box_append(GTK_BOX(card), top_row);
 
   /* 2. Comment body or inline editor */
-  const bool is_editing = (g_strcmp0(ann->id, state->zathura->annotations.editing_id) == 0);
   if (is_editing) {
     GtkWidget* editor = gtk_text_view_new();
     gtk_widget_add_css_class(editor, "annotation-editor");
@@ -408,8 +519,15 @@ GtkWidget* zathura_annotation_panel_new(zathura_t* zathura) {
   zathura_annotation_panel_state_t* state = g_malloc0(sizeof(zathura_annotation_panel_state_t));
   state->zathura                          = zathura;
   state->root                             = panel;
+  state->collapsed_ids                    = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
   state->show_resolved                    = false;
   g_object_set_data_full(G_OBJECT(panel), "zathura-annotation-panel-state", state, panel_state_free);
+  g_signal_connect(panel, "notify::visible", G_CALLBACK(cb_panel_visible_notify), state);
+
+  GtkEventController* scroll_ctrl = gtk_event_controller_scroll_new(GTK_EVENT_CONTROLLER_SCROLL_VERTICAL);
+  gtk_event_controller_set_propagation_phase(scroll_ctrl, GTK_PHASE_CAPTURE);
+  g_signal_connect(scroll_ctrl, "scroll", G_CALLBACK(cb_panel_scroll), panel);
+  gtk_widget_add_controller(panel, scroll_ctrl);
 
   /* Header bar */
   GtkWidget* header = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
@@ -424,6 +542,14 @@ GtkWidget* zathura_annotation_panel_new(zathura_t* zathura) {
   state->count_label = gtk_label_new("0");
   gtk_widget_add_css_class(state->count_label, "annotation-count-badge");
   gtk_box_append(GTK_BOX(header), state->count_label);
+
+  state->collapse_all_btn = gtk_button_new_with_label(_("Roll up"));
+  gtk_widget_add_css_class(state->collapse_all_btn, "annotation-card-btn");
+  gtk_widget_add_css_class(state->collapse_all_btn, "annotation-collapse-all-btn");
+  gtk_widget_add_css_class(state->collapse_all_btn, "flat");
+  gtk_widget_set_tooltip_text(state->collapse_all_btn, _("Roll up all comments"));
+  g_signal_connect(state->collapse_all_btn, "clicked", G_CALLBACK(cb_collapse_all_clicked), state);
+  gtk_box_append(GTK_BOX(header), state->collapse_all_btn);
 
   state->show_resolved_check = gtk_check_button_new_with_label(_("Show resolved"));
   gtk_widget_add_css_class(state->show_resolved_check, "annotation-header-check");
@@ -461,8 +587,9 @@ void zathura_annotation_panel_refresh(GtkWidget* panel) {
   }
 
   sync_active_editor_draft(state);
-  state->active_editor = NULL;
-  state->card_count    = 0;
+  state->active_editor   = NULL;
+  state->card_count      = 0;
+  state->collapsed_count = 0;
 
   /* Clear existing children in list_box */
   GtkWidget* child = gtk_widget_get_first_child(state->list_box);
@@ -488,11 +615,22 @@ void zathura_annotation_panel_refresh(GtkWidget* panel) {
       GtkWidget* card = create_card_widget(state, ann);
       gtk_box_append(GTK_BOX(state->list_box), card);
       ++state->card_count;
+      if (!is_editing && is_annotation_collapsed(state, ann->id)) {
+        ++state->collapsed_count;
+      }
     }
   }
 
   g_autofree char* count_str = g_strdup_printf("%u", state->card_count);
   gtk_label_set_text(GTK_LABEL(state->count_label), count_str);
+
+  if (state->collapse_all_btn != NULL) {
+    const bool all_collapsed = (state->card_count > 0 && state->collapsed_count == state->card_count);
+    gtk_button_set_label(GTK_BUTTON(state->collapse_all_btn), all_collapsed ? _("Expand all") : _("Roll up"));
+    gtk_widget_set_tooltip_text(state->collapse_all_btn,
+                                all_collapsed ? _("Expand all comments") : _("Roll up all comments"));
+    gtk_widget_set_sensitive(state->collapse_all_btn, state->card_count > 0);
+  }
 
   if (state->card_count == 0) {
     GtkWidget* empty_label = gtk_label_new(_("No comments yet. Select text and right-click to add a comment."));
@@ -532,6 +670,9 @@ void zathura_annotation_panel_start_edit(GtkWidget* panel, const char* annotatio
     return;
   }
 
+  if (state->collapsed_ids != NULL) {
+    g_hash_table_remove(state->collapsed_ids, annotation_id);
+  }
   sync_active_editor_draft(state);
   zathura_annotations_set_active(state->zathura, annotation_id);
   zathura_annotations_start_edit(state->zathura, annotation_id, is_new);
@@ -540,6 +681,90 @@ void zathura_annotation_panel_start_edit(GtkWidget* panel, const char* annotatio
   if (state->active_editor != NULL) {
     gtk_widget_grab_focus(state->active_editor);
   }
+}
+
+void zathura_annotation_panel_set_all_collapsed(GtkWidget* panel, bool collapsed) {
+  zathura_annotation_panel_state_t* state = get_panel_state(panel);
+  if (state == NULL || state->collapsed_ids == NULL) {
+    return;
+  }
+
+  sync_active_editor_draft(state);
+  g_hash_table_remove_all(state->collapsed_ids);
+  if (collapsed && state->zathura != NULL && state->zathura->annotations.list != NULL) {
+    for (size_t idx = 0; idx != girara_list_size(state->zathura->annotations.list); ++idx) {
+      zathura_annotation_t* ann = girara_list_nth(state->zathura->annotations.list, idx);
+      if (ann != NULL && ann->id != NULL) {
+        g_hash_table_add(state->collapsed_ids, g_strdup(ann->id));
+      }
+    }
+  }
+  zathura_annotation_panel_refresh(panel);
+}
+
+bool zathura_annotation_panel_are_all_collapsed(GtkWidget* panel) {
+  zathura_annotation_panel_state_t* state = get_panel_state(panel);
+  if (state == NULL || state->card_count == 0) {
+    return false;
+  }
+  return state->collapsed_count == state->card_count;
+}
+
+void zathura_annotation_panel_set_annotation_collapsed(GtkWidget* panel, const char* annotation_id, bool collapsed) {
+  zathura_annotation_panel_state_t* state = get_panel_state(panel);
+  if (state == NULL || state->collapsed_ids == NULL || annotation_id == NULL) {
+    return;
+  }
+
+  sync_active_editor_draft(state);
+  if (collapsed) {
+    g_hash_table_add(state->collapsed_ids, g_strdup(annotation_id));
+  } else {
+    g_hash_table_remove(state->collapsed_ids, annotation_id);
+  }
+  zathura_annotation_panel_refresh(panel);
+}
+
+bool zathura_annotation_panel_is_annotation_collapsed(GtkWidget* panel, const char* annotation_id) {
+  zathura_annotation_panel_state_t* state = get_panel_state(panel);
+  return is_annotation_collapsed(state, annotation_id);
+}
+
+bool zathura_annotation_panel_scroll(GtkWidget* panel, double dx, double dy) {
+  (void)dx;
+  zathura_annotation_panel_state_t* state = get_panel_state(panel);
+  if (state == NULL || state->scrolled_window == NULL) {
+    return false;
+  }
+
+  GtkAdjustment* vadj = gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(state->scrolled_window));
+  if (vadj == NULL) {
+    return false;
+  }
+
+  double step = gtk_adjustment_get_step_increment(vadj);
+  if (step <= 1.0) {
+    const double page_size = gtk_adjustment_get_page_size(vadj);
+    step                   = page_size > 0.0 ? MAX(48.0, page_size * 0.15) : 56.0;
+  }
+
+  const double lower     = gtk_adjustment_get_lower(vadj);
+  const double upper     = gtk_adjustment_get_upper(vadj);
+  const double page_size = gtk_adjustment_get_page_size(vadj);
+  const double max_val   = MAX(lower, upper - page_size);
+  const double cur_val   = gtk_adjustment_get_value(vadj);
+  const double next_val  = CLAMP(cur_val + dy * step, lower, max_val);
+
+  gtk_adjustment_set_value(vadj, next_val);
+  return true;
+}
+
+GtkAdjustment* zathura_annotation_panel_get_vadjustment(GtkWidget* panel) {
+  zathura_annotation_panel_state_t* state = get_panel_state(panel);
+  if (state == NULL || state->scrolled_window == NULL) {
+    return NULL;
+  }
+  return gtk_scrolled_window_get_vadjustment(GTK_SCROLLED_WINDOW(state->scrolled_window));
 }
 
 void zathura_annotation_panel_set_show_resolved(GtkWidget* panel, bool show_resolved) {

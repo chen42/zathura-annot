@@ -817,8 +817,13 @@ bool sc_scroll(girara_session_t* session, girara_argument_t* argument, girara_ev
   const unsigned int h_padding =
       zathura_document_widget_get_page_h_padding(ZATHURA_DOCUMENT_WIDGET(zathura->ui.document_widget));
 
+  GtkAdjustment* hadjustment =
+      zathura->ui.view != NULL ? gtk_scrolled_window_get_hadjustment(GTK_SCROLLED_WINDOW(zathura->ui.view)) : NULL;
+  const double eff_doc_width =
+      hadjustment != NULL ? MAX((double)doc_width, gtk_adjustment_get_upper(hadjustment)) : (double)doc_width;
+
   const double vstep = (double)(view_height + v_padding) / (double)doc_height;
-  const double hstep = (double)(view_width + h_padding) / (double)doc_width;
+  const double hstep = (double)(view_width + h_padding) / eff_doc_width;
 
   /* compute new position */
   switch (argument->n) {
@@ -854,18 +859,18 @@ bool sc_scroll(girara_session_t* session, girara_argument_t* argument, girara_ev
 
   case LEFT:
   case RIGHT:
-    pos_x += direction * t * scroll_hstep / (double)doc_width;
+    pos_x += direction * t * scroll_hstep / eff_doc_width;
     break;
 
   case BIDIRECTIONAL: {
-    pos_x += event->x * t * scroll_hstep / (double)doc_width;
+    pos_x += event->x * t * scroll_hstep / eff_doc_width;
     pos_y += event->y * t * scroll_step / (double)doc_height;
     break;
   }
   }
 
   /* handle boundaries */
-  const double end_x = 0.5 * (double)view_width / (double)doc_width;
+  const double end_x = 0.5 * (double)view_width / eff_doc_width;
   const double end_y = 0.5 * (double)view_height / (double)doc_height;
 
   const double new_x = scroll_wrap ? 1.0 - end_x : end_x;

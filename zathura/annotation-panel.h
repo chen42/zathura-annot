@@ -18,5 +18,11 @@ bool zathura_annotation_panel_get_show_resolved(GtkWidget* panel);
 unsigned int zathura_annotation_panel_get_card_count(GtkWidget* panel);
 GtkWidget* zathura_annotation_panel_get_editor_text_view(GtkWidget* panel);
 bool zathura_annotation_panel_handle_editor_key(GtkWidget* panel, guint keyval, GdkModifierType state);
+void zathura_annotation_panel_set_all_collapsed(GtkWidget* panel, bool collapsed);
+bool zathura_annotation_panel_are_all_collapsed(GtkWidget* panel);
+void zathura_annotation_panel_set_annotation_collapsed(GtkWidget* panel, const char* annotation_id, bool collapsed);
+bool zathura_annotation_panel_is_annotation_collapsed(GtkWidget* panel, const char* annotation_id);
+bool zathura_annotation_panel_scroll(GtkWidget* panel, double dx, double dy);
+GtkAdjustment* zathura_annotation_panel_get_vadjustment(GtkWidget* panel);
 
 #endif // ANNOTATION_PANEL_H

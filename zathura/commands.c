@@ -13,6 +13,7 @@
 #include <string.h>
 
 #include "adjustment.h"
+#include "annotation-panel.h"
 #include "bookmarks.h"
 #include "config.h"
 #include "database.h"
@@ -710,7 +711,36 @@ bool cmd_source(girara_session_t* session, girara_list_t* argument_list) {
   return true;
 }
 
-bool cmd_comments(girara_session_t* session, girara_list_t* UNUSED(argument_list)) {
+bool cmd_comments(girara_session_t* session, girara_list_t* argument_list) {
   g_return_val_if_fail(session != NULL, false);
+  g_return_val_if_fail(session->global.data != NULL, false);
+  zathura_t* zathura = session->global.data;
+  if (zathura->ui.annotation_panel == NULL) {
+    return false;
+  }
+
+  if (argument_list != NULL && girara_list_size(argument_list) > 0) {
+    const char* arg = girara_list_nth(argument_list, 0);
+    if (g_strcmp0(arg, "open") == 0) {
+      gtk_widget_set_visible(zathura->ui.annotation_panel, TRUE);
+      zathura_annotation_panel_refresh(zathura->ui.annotation_panel);
+      return true;
+    }
+    if (g_strcmp0(arg, "close") == 0) {
+      gtk_widget_set_visible(zathura->ui.annotation_panel, FALSE);
+      return true;
+    }
+    if (g_strcmp0(arg, "rollup") == 0 || g_strcmp0(arg, "collapse") == 0) {
+      gtk_widget_set_visible(zathura->ui.annotation_panel, TRUE);
+      zathura_annotation_panel_set_all_collapsed(zathura->ui.annotation_panel, true);
+      return true;
+    }
+    if (g_strcmp0(arg, "expand") == 0 || g_strcmp0(arg, "unroll") == 0) {
+      gtk_widget_set_visible(zathura->ui.annotation_panel, TRUE);
+      zathura_annotation_panel_set_all_collapsed(zathura->ui.annotation_panel, false);
+      return true;
+    }
+  }
+
   return sc_toggle_annotations(session, NULL, NULL, 0);
 }
