@@ -17,21 +17,29 @@ typedef struct zathura_annotation_panel_state_s {
   GtkWidget* count_label;
   GtkWidget* collapse_all_btn;
   GtkWidget* show_resolved_check;
+  GtkWidget* filter_entry;
+  GtkWidget* filter_clear_btn;
   GtkWidget* scrolled_window;
   GtkWidget* list_box;
   GtkWidget* active_editor;
   GHashTable* collapsed_ids;
+  char* filter_text;
   bool show_resolved;
   unsigned int card_count;
   unsigned int collapsed_count;
   bool updating_toggle;
+  bool updating_filter;
 } zathura_annotation_panel_state_t;
 
 static void panel_state_free(gpointer data) {
   zathura_annotation_panel_state_t* state = data;
-  if (state != NULL && state->collapsed_ids != NULL) {
-    g_hash_table_destroy(state->collapsed_ids);
-    state->collapsed_ids = NULL;
+  if (state != NULL) {
+    if (state->collapsed_ids != NULL) {
+      g_hash_table_destroy(state->collapsed_ids);
+      state->collapsed_ids = NULL;
+    }
+    g_free(state->filter_text);
+    state->filter_text = NULL;
   }
   g_free(state);
 }
@@ -323,6 +331,69 @@ static gboolean cb_panel_scroll(GtkEventControllerScroll* controller, gdouble dx
   return zathura_annotation_panel_scroll(panel, dx, wheel_dy) ? TRUE : FALSE;
 }
 
+static bool annotation_matches_filter(const zathura_annotation_t* ann, const char* filter_text) {
+  if (filter_text == NULL || filter_text[0] == '\0') {
+    return true;
+  }
+  if (ann == NULL || ann->comment == NULL || ann->comment[0] == '\0') {
+    return false;
+  }
+
+  g_autofree char* needle   = g_utf8_casefold(filter_text, -1);
+  g_autofree char* haystack = g_utf8_casefold(ann->comment, -1);
+  if (needle == NULL || haystack == NULL) {
+    return false;
+  }
+  return strstr(haystack, needle) != NULL;
+}
+
+static void cb_filter_entry_changed(GtkEditable* editable, gpointer user_data) {
+  zathura_annotation_panel_state_t* state = user_data;
+  if (state == NULL || state->updating_filter) {
+    return;
+  }
+
+  const char* text = gtk_editable_get_text(editable);
+  g_free(state->filter_text);
+  state->filter_text = g_strdup(text != NULL ? text : "");
+  zathura_annotation_panel_refresh(state->root);
+}
+
+static void cb_filter_clear_clicked(GtkButton* UNUSED(button), gpointer user_data) {
+  zathura_annotation_panel_state_t* state = user_data;
+  if (state == NULL || state->root == NULL) {
+    return;
+  }
+  zathura_annotation_panel_set_filter_text(state->root, "");
+}
+
+static gboolean cb_filter_key_pressed(GtkEventControllerKey* UNUSED(controller), guint keyval, guint UNUSED(keycode),
+                                      GdkModifierType UNUSED(mods), gpointer user_data) {
+  zathura_annotation_panel_state_t* state = user_data;
+  if (state == NULL || state->root == NULL) {
+    return FALSE;
+  }
+
+  if (keyval == GDK_KEY_Escape) {
+    if (state->filter_text != NULL && state->filter_text[0] != '\0') {
+      zathura_annotation_panel_set_filter_text(state->root, "");
+    }
+    if (state->zathura != NULL && state->zathura->ui.session != NULL && state->zathura->ui.session->gtk.view != NULL) {
+      gtk_widget_grab_focus(state->zathura->ui.session->gtk.view);
+    }
+    return TRUE;
+  }
+
+  if (keyval == GDK_KEY_Return || keyval == GDK_KEY_KP_Enter) {
+    if (state->zathura != NULL && state->zathura->ui.session != NULL && state->zathura->ui.session->gtk.view != NULL) {
+      gtk_widget_grab_focus(state->zathura->ui.session->gtk.view);
+    }
+    return TRUE;
+  }
+
+  return FALSE;
+}
+
 static GtkWidget* create_card_widget(zathura_annotation_panel_state_t* state, zathura_annotation_t* ann) {
   const bool is_editing   = (g_strcmp0(ann->id, state->zathura->annotations.editing_id) == 0);
   const bool is_collapsed = !is_editing && is_annotation_collapsed(state, ann->id);
@@ -565,6 +636,33 @@ GtkWidget* zathura_annotation_panel_new(zathura_t* zathura) {
 
   gtk_box_append(GTK_BOX(panel), header);
 
+  /* Filter bar */
+  GtkWidget* filter_bar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+  gtk_widget_add_css_class(filter_bar, "annotation-filter-bar");
+
+  state->filter_entry = gtk_entry_new();
+  gtk_widget_add_css_class(state->filter_entry, "annotation-filter-entry");
+  gtk_widget_set_hexpand(state->filter_entry, TRUE);
+  gtk_entry_set_placeholder_text(GTK_ENTRY(state->filter_entry), _("Filter comments..."));
+  g_signal_connect(state->filter_entry, "changed", G_CALLBACK(cb_filter_entry_changed), state);
+
+  GtkEventController* filter_key_ctrl = gtk_event_controller_key_new();
+  gtk_event_controller_set_propagation_phase(filter_key_ctrl, GTK_PHASE_CAPTURE);
+  g_signal_connect(filter_key_ctrl, "key-pressed", G_CALLBACK(cb_filter_key_pressed), state);
+  gtk_widget_add_controller(state->filter_entry, filter_key_ctrl);
+  gtk_box_append(GTK_BOX(filter_bar), state->filter_entry);
+
+  state->filter_clear_btn = gtk_button_new_with_label(_("Clear"));
+  gtk_widget_add_css_class(state->filter_clear_btn, "annotation-card-btn");
+  gtk_widget_add_css_class(state->filter_clear_btn, "annotation-filter-clear-btn");
+  gtk_widget_add_css_class(state->filter_clear_btn, "flat");
+  gtk_widget_set_tooltip_text(state->filter_clear_btn, _("Clear comment filter"));
+  gtk_widget_set_sensitive(state->filter_clear_btn, FALSE);
+  g_signal_connect(state->filter_clear_btn, "clicked", G_CALLBACK(cb_filter_clear_clicked), state);
+  gtk_box_append(GTK_BOX(filter_bar), state->filter_clear_btn);
+
+  gtk_box_append(GTK_BOX(panel), filter_bar);
+
   /* Scrolled card list */
   state->scrolled_window = gtk_scrolled_window_new();
   gtk_widget_set_vexpand(state->scrolled_window, TRUE);
@@ -608,7 +706,8 @@ void zathura_annotation_panel_refresh(GtkWidget* panel) {
 
       const bool is_editing = (g_strcmp0(ann->id, state->zathura->annotations.editing_id) == 0);
       const bool has_comm   = zathura_annotation_has_comment(ann);
-      if (!is_editing && (!has_comm || (!state->show_resolved && ann->resolved))) {
+      if (!is_editing && (!has_comm || (!state->show_resolved && ann->resolved) ||
+                          !annotation_matches_filter(ann, state->filter_text))) {
         continue;
       }
 
@@ -632,8 +731,14 @@ void zathura_annotation_panel_refresh(GtkWidget* panel) {
     gtk_widget_set_sensitive(state->collapse_all_btn, state->card_count > 0);
   }
 
+  const bool has_filter = (state->filter_text != NULL && state->filter_text[0] != '\0');
+  if (state->filter_clear_btn != NULL) {
+    gtk_widget_set_sensitive(state->filter_clear_btn, has_filter);
+  }
+
   if (state->card_count == 0) {
-    GtkWidget* empty_label = gtk_label_new(_("No comments yet. Select text and right-click to add a comment."));
+    GtkWidget* empty_label = gtk_label_new(
+        has_filter ? _("No matching comments.") : _("No comments yet. Select text and right-click to add a comment."));
     gtk_widget_add_css_class(empty_label, "annotation-empty-state");
     gtk_label_set_wrap(GTK_LABEL(empty_label), TRUE);
     gtk_label_set_xalign(GTK_LABEL(empty_label), 0.0f);
@@ -648,6 +753,15 @@ void zathura_annotation_panel_focus_annotation(GtkWidget* panel, const char* ann
   }
 
   zathura_annotation_t* ann = zathura_annotations_find(state->zathura, annotation_id);
+  if (ann != NULL && !annotation_matches_filter(ann, state->filter_text)) {
+    g_free(state->filter_text);
+    state->filter_text = g_strdup("");
+    if (state->filter_entry != NULL) {
+      state->updating_filter = true;
+      gtk_editable_set_text(GTK_EDITABLE(state->filter_entry), "");
+      state->updating_filter = false;
+    }
+  }
   if (ann != NULL && ann->resolved && !state->show_resolved) {
     zathura_annotation_panel_set_show_resolved(panel, true);
   } else {
@@ -803,4 +917,36 @@ GtkWidget* zathura_annotation_panel_get_editor_text_view(GtkWidget* panel) {
     return NULL;
   }
   return state->active_editor;
+}
+
+void zathura_annotation_panel_set_filter_text(GtkWidget* panel, const char* filter_text) {
+  zathura_annotation_panel_state_t* state = get_panel_state(panel);
+  if (state == NULL) {
+    return;
+  }
+
+  g_free(state->filter_text);
+  state->filter_text = g_strdup(filter_text != NULL ? filter_text : "");
+  if (state->filter_entry != NULL) {
+    state->updating_filter = true;
+    gtk_editable_set_text(GTK_EDITABLE(state->filter_entry), state->filter_text);
+    state->updating_filter = false;
+  }
+  zathura_annotation_panel_refresh(panel);
+}
+
+const char* zathura_annotation_panel_get_filter_text(GtkWidget* panel) {
+  zathura_annotation_panel_state_t* state = get_panel_state(panel);
+  if (state == NULL || state->filter_text == NULL) {
+    return "";
+  }
+  return state->filter_text;
+}
+
+GtkWidget* zathura_annotation_panel_get_filter_entry(GtkWidget* panel) {
+  zathura_annotation_panel_state_t* state = get_panel_state(panel);
+  if (state == NULL) {
+    return NULL;
+  }
+  return state->filter_entry;
 }

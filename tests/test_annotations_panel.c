@@ -332,6 +332,67 @@ static void test_panel_mouse_wheel_scroll(void) {
   zathura_free(zathura);
 }
 
+static void test_panel_filter_comments_by_word_and_phrase(void) {
+  zathura_t* zathura        = create_test_zathura();
+  girara_session_t* session = zathura->ui.session;
+  GtkWidget* panel          = zathura->ui.annotation_panel;
+  g_assert_nonnull(panel);
+
+  girara_list_t* r1 = girara_list_new_with_free(g_free);
+  append_rect(r1, 10.0, 20.0, 100.0, 35.0);
+
+  zathura_annotation_t* a1 = zathura_annotation_new(
+      0, ZATHURA_ANNOTATION_COLOR_RED, r1, "Quote 1", "Verify statistical power for cohort");
+  zathura_annotation_t* a2 = zathura_annotation_new(
+      0, ZATHURA_ANNOTATION_COLOR_RED, r1, "Quote 2", "Check dopamine receptor expression");
+  zathura_annotation_t* a3 = zathura_annotation_new(
+      0, ZATHURA_ANNOTATION_COLOR_RED, r1, "Quote 3", "Statistical power calculation in supplement");
+  girara_list_free(r1);
+
+  zathura_annotations_add(zathura, a1);
+  zathura_annotations_add(zathura, a2);
+  zathura_annotations_add(zathura, a3);
+
+  gtk_widget_set_visible(panel, TRUE);
+  zathura_annotation_panel_refresh(panel);
+  g_assert_cmpuint(zathura_annotation_panel_get_card_count(panel), ==, 3);
+
+  GtkWidget* filter_entry = zathura_annotation_panel_get_filter_entry(panel);
+  g_assert_nonnull(filter_entry);
+
+  /* Typing into the filter entry filters comments case-insensitively */
+  gtk_editable_set_text(GTK_EDITABLE(filter_entry), "statistical power");
+  g_assert_cmpstr(zathura_annotation_panel_get_filter_text(panel), ==, "statistical power");
+  g_assert_cmpuint(zathura_annotation_panel_get_card_count(panel), ==, 2);
+
+  /* Filtering by a single word */
+  zathura_annotation_panel_set_filter_text(panel, "DOPAMINE");
+  g_assert_cmpuint(zathura_annotation_panel_get_card_count(panel), ==, 1);
+
+  /* Filtering via :comments filter <phrase> */
+  girara_list_t* args_filter = girara_list_new();
+  girara_list_append(args_filter, (void*)"filter");
+  girara_list_append(args_filter, (void*)"in");
+  girara_list_append(args_filter, (void*)"supplement");
+  g_assert_true(cmd_comments(session, args_filter));
+  girara_list_free(args_filter);
+  g_assert_cmpstr(zathura_annotation_panel_get_filter_text(panel), ==, "in supplement");
+  g_assert_cmpuint(zathura_annotation_panel_get_card_count(panel), ==, 1);
+
+  /* Non-matching filter shows 0 cards and empty state */
+  zathura_annotation_panel_set_filter_text(panel, "nonexistent phrase");
+  g_assert_cmpuint(zathura_annotation_panel_get_card_count(panel), ==, 0);
+  GtkWidget* empty_label = find_widget_by_css_class(panel, "annotation-empty-state");
+  g_assert_nonnull(empty_label);
+  g_assert_cmpstr(gtk_label_get_text(GTK_LABEL(empty_label)), ==, "No matching comments.");
+
+  /* Clearing the filter restores all 3 comments */
+  zathura_annotation_panel_set_filter_text(panel, "");
+  g_assert_cmpuint(zathura_annotation_panel_get_card_count(panel), ==, 3);
+
+  zathura_free(zathura);
+}
+
 int main(int argc, char* argv[]) {
   setup_logger();
   gtk_init();
@@ -349,6 +410,8 @@ int main(int argc, char* argv[]) {
   g_test_add_func("/annotations/panel/roll_up_all_and_expand_one_by_one",
                   test_panel_roll_up_all_and_expand_one_by_one);
   g_test_add_func("/annotations/panel/mouse_wheel_scroll", test_panel_mouse_wheel_scroll);
+  g_test_add_func("/annotations/panel/filter_comments_by_word_and_phrase",
+                  test_panel_filter_comments_by_word_and_phrase);
 
   return g_test_run();
 }

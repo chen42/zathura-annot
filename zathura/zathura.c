@@ -1517,7 +1517,7 @@ bool document_close(zathura_t* zathura, bool keep_monitor) {
   }
   zathura_annotations_clear(zathura);
   if (zathura->ui.annotation_panel != NULL) {
-    zathura_annotation_panel_refresh(zathura->ui.annotation_panel);
+    zathura_annotation_panel_set_filter_text(zathura->ui.annotation_panel, "");
   }
 
   /* remove marks */

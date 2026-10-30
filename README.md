@@ -21,13 +21,14 @@ Added Features in zathura-annot
   * Right-click an existing highlight to add or edit its comment, mark it resolved or unresolved, or remove the highlight.
 * **Comment Side Panel**:
   * Displays comment cards ordered by page and vertical position, with a per-card collapse/expand toggle (`▾` / `▸`), a top-right `×` delete button, compact bottom action buttons (`Page N`, `Edit`, `Resolve`/`Unresolve`), a global `Roll up` / `Expand all` button in the header, and a `Show resolved` filter.
+  * Includes a live search/filter bar (`Filter comments...` with a `Clear` button) that filters comments case-insensitively by word or phrase as you type.
   * Rolling up comments collapses cards to show only the first line of each comment; individual comments can still be expanded or collapsed one by one.
   * Rolling the mouse wheel while hovering over the comment panel scrolls the comment list without scrolling the PDF page.
   * Clicking a comment card selects the annotation; clicking a highlight selects and focuses its card in the panel.
   * Hiding the comment panel keeps page highlights visible.
   * A bottom horizontal scrollbar (`guioptions` default `"sh"`) and horizontal scrolling (`h` / `l` or `Shift` + mouse wheel) allow moving the PDF page left or right on wide monitors so the comment panel does not cover page text.
 * **Keyboard Shortcuts and Commands**:
-  * `Ctrl+Alt+c`: Toggle the comment side panel (also available via `:comments [open|close|toggle|rollup|expand]`).
+  * `Ctrl+Alt+c`: Toggle the comment side panel (also available via `:comments [open|close|toggle|rollup|expand|filter <phrase>|clear-filter]`).
   * `Delete` / `BackSpace`: Remove the currently selected highlight or annotation.
   * `Ctrl+Enter` / `Esc` (inside the inline comment editor): Save or cancel the comment edit.
 * **Configuration (`zathurarc`)**:

@@ -67,6 +67,27 @@
   font-size: 0.82em;
 }
 
+#@session@ .annotation-filter-bar {
+  padding: 4px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+#@session@ entry.annotation-filter-entry {
+  min-height: 22px;
+  padding: 2px 6px;
+  font-size: 0.84em;
+  background-image: none;
+  background-color: rgba(18, 18, 22, 0.94);
+  color: #f4f4f6;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 4px;
+  box-shadow: none;
+}
+
+#@session@ entry.annotation-filter-entry:focus-within {
+  border-color: rgba(255, 255, 255, 0.36);
+}
+
 #@session@ .annotation-panel-list {
   background-color: transparent;
 }

@@ -740,6 +740,26 @@ bool cmd_comments(girara_session_t* session, girara_list_t* argument_list) {
       zathura_annotation_panel_set_all_collapsed(zathura->ui.annotation_panel, false);
       return true;
     }
+    if (g_strcmp0(arg, "filter") == 0 || g_strcmp0(arg, "search") == 0) {
+      gtk_widget_set_visible(zathura->ui.annotation_panel, TRUE);
+      g_autoptr(GString) query = g_string_new("");
+      for (size_t idx = 1; idx < girara_list_size(argument_list); ++idx) {
+        const char* part = girara_list_nth(argument_list, idx);
+        if (part == NULL) {
+          continue;
+        }
+        if (query->len > 0) {
+          g_string_append_c(query, ' ');
+        }
+        g_string_append(query, part);
+      }
+      zathura_annotation_panel_set_filter_text(zathura->ui.annotation_panel, query->str);
+      return true;
+    }
+    if (g_strcmp0(arg, "clear-filter") == 0) {
+      zathura_annotation_panel_set_filter_text(zathura->ui.annotation_panel, "");
+      return true;
+    }
   }
 
   return sc_toggle_annotations(session, NULL, NULL, 0);

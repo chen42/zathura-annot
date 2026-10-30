@@ -24,5 +24,8 @@ void zathura_annotation_panel_set_annotation_collapsed(GtkWidget* panel, const c
 bool zathura_annotation_panel_is_annotation_collapsed(GtkWidget* panel, const char* annotation_id);
 bool zathura_annotation_panel_scroll(GtkWidget* panel, double dx, double dy);
 GtkAdjustment* zathura_annotation_panel_get_vadjustment(GtkWidget* panel);
+void zathura_annotation_panel_set_filter_text(GtkWidget* panel, const char* filter_text);
+const char* zathura_annotation_panel_get_filter_text(GtkWidget* panel);
+GtkWidget* zathura_annotation_panel_get_filter_entry(GtkWidget* panel);
 
 #endif // ANNOTATION_PANEL_H
